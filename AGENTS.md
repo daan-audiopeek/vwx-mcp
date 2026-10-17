@@ -249,6 +249,7 @@ From the phase-0 discovery on one real plot (VW 2026 31.3.0, Dutch UI,
 | Hanging positions not found as `Hanging Position` | the PIO is `Light Position Obj`; truss is `TrussItem` | use the PIO names from the field map |
 | Devices "inside" a position | they are not nested — parent is the layer; link is the text field `Position` = position's `Position Name` | match by name |
 | Numbers/booleans don't parse | `GetRField` returns locale text: decimal comma (`0,61`), localized booleans, units (`41°`) | parse with a locale-aware helper; booleans by field type 2 |
+| Footprint `Num Channels` looks right but overlaps the real patch | it is only refreshed when a **GDTF mode** is chosen; mode → none keeps the old value; devices without GDTF keep a default | trust it only with `GDTF Fixture Mode` set; else use a user footprint table, report the source |
 | Universe/address storage | `Universe` (text), `DMX Address` (int), `Absolute Address` = (u-1)·512+a, `UniverseAddress` `'u/a'` (`'0/0'` unpatched), footprint `Num Channels` | write `Universe` + `DMX Address`, verify the derived fields by read-back (untested) |
 
 ## Server internals (for tool authors)

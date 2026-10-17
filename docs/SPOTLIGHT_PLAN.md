@@ -128,9 +128,21 @@ universal names fail silently, they do not pop a dialog). Field map:
   Symbol Name although the record has values → **GetRField is the read path**,
   `LDevice_*` only where cells/accessories force it. Field map v2.
 
+### Results, run 3 (GDTF mode test, one device, 2026-10-17)
+
+| Step | GDTF Fixture | GDTF Mode | Num Channels | DMX Address |
+|---|---|---|---|---|
+| baseline | FOS BAR PENTE | 90 Channels | 90 | 1 |
+| mode → none | (empty) | (empty) | **90 (stale)** | 1 |
+| other GDTF | ADJ Vizi Hex | Mode 1 | 15 | 1 |
+
+Choosing a GDTF mode overwrites `Num Channels`; clearing it does not. Patch and
+`Fixture Mode` are untouched. Footprint source order for `check_patch` is
+therefore: user table > `Num Channels` **only if `GDTF Fixture Mode` is set**
+> `Num Channels` as "unverified". Not tested: another mode of the same fixture.
+
 Still open for phase 0: one multi-cell device and one device with
-an accessory (in a copy); a GDTF device with a mode set, to see whether
-`Num Channels` follows the mode.
+an accessory (in a copy); (GDTF mode question answered in run 3).
 
 ## 3. Architecture
 

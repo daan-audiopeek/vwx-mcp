@@ -18,7 +18,7 @@
     "address":          {"field": "DMX Address",       "type": 1,  "ldevice": "DMX Address"},
     "absolute_address": {"field": "Absolute Address",  "type": 1,  "ldevice": "Absolute Address", "note": "= (universe-1)*512 + address, held for all 36 devices"},
     "universe_address": {"field": "UniverseAddress",   "type": 4,  "ldevice": "UniverseAddress", "note": "'u/a', '0/0' when unpatched"},
-    "footprint":        {"field": "Num Channels",      "type": 1,  "ldevice": null, "note": "LDevice_GetParamLong('Num Channels') returned 0 while the record holds 13 - read the record. Whether it follows the chosen mode is unverified (Fixture Mode was empty on all devices)"},
+    "footprint":        {"field": "Num Channels",      "type": 1,  "ldevice": null, "note": "Read the record (LDevice_GetParamLong returned 0 for 13). Choosing a GDTF mode overwrites it with that mode's channel count (90 Channels -> 90, ADJ Vizi Hex Mode 1 -> 15). Setting the mode to none leaves the LAST value (stale). So trust it only when GDTF Fixture Mode is set; otherwise it is a default/stale value"},
     "position":         {"field": "Position",          "type": 4,  "ldevice": "Position", "note": "link to Light Position Obj 'Position Name' by text; devices are NOT nested in the position (parent = layer)"},
     "purpose":          {"field": "Purpose",           "type": 4,  "ldevice": null},
     "instrument_type":  {"field": "Inst Type",         "type": 4,  "ldevice": null, "note": "LDevice_GetParamStr returned '' while the record had a value (same for Device Type, Wattage, Symbol Name)"},
