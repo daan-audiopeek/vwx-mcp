@@ -2998,7 +2998,7 @@ def list_hanging_positions(ctx: Context, layers: Optional[List[str]] = None) -> 
 def set_lighting_device_fields(ctx: Context, changes: Optional[List[Dict[str, Any]]] = None,
                                object_ids: Optional[List[str]] = None,
                                fields: Optional[Dict[str, Any]] = None,
-                               dry_run: bool = True) -> str:
+                               dry_run: bool = True, save_first: bool = False) -> str:
     """Set fields on lighting devices. Writable keys: unit, channel, universe,
     address, position, purpose, color, gobo, gobo2, dimmer, circuit_number,
     circuit_name, focus, user1 (None/'' clears). Either changes =
@@ -3006,8 +3006,10 @@ def set_lighting_device_fields(ctx: Context, changes: Optional[List[Dict[str, An
     (same values). dry_run=True (default) only returns the diff — show it to
     the user, then call again with dry_run=false. Each result has `previous`:
     pass those back as changes to restore. Nothing is written if any change is
-    invalid; writes are read back and mismatches reported."""
+    invalid; writes are read back and mismatches reported. save_first=true
+    saves the drawing before writing (refused for a never-saved drawing)."""
     p = {"dry_run": dry_run}
+    if save_first: p["save_first"] = True
     if changes is not None: p["changes"] = changes
     if object_ids is not None: p["object_ids"] = object_ids
     if fields is not None: p["fields"] = fields
@@ -3023,12 +3025,14 @@ def bulk_set_lighting_fields(ctx: Context, fields: Dict[str, Any],
                              universe: Optional[int] = None, patched: Optional[bool] = None,
                              search: Optional[str] = None,
                              layers: Optional[List[str]] = None,
-                             all_devices: bool = False, dry_run: bool = True) -> str:
+                             all_devices: bool = False, dry_run: bool = True,
+                             save_first: bool = False) -> str:
     """Set the same fields on every device matching the filters (same filters
     as list_lighting_devices), e.g. color on all units of one position.
     Without any filter, all_devices=true is required. dry_run=True (default)
-    returns the diff only."""
+    returns the diff only. save_first=true saves the drawing before writing."""
     p = {"fields": fields, "dry_run": dry_run}
+    if save_first: p["save_first"] = True
     for k, v in (("position", position), ("layer", layer), ("class_name", class_name),
                  ("instrument_type", instrument_type), ("device_type", device_type),
                  ("purpose", purpose), ("color", color), ("universe", universe),
@@ -3065,12 +3069,16 @@ def suggest_footprints(ctx: Context, layers: Optional[List[str]] = None) -> str:
 
 @vtool
 def set_footprint(ctx: Context, instrument_type: str, channels: Optional[int] = None,
-                  scope: str = "document", note: Optional[str] = None) -> str:
+                  scope: str = "document", note: Optional[str] = None,
+                  save_first: bool = False) -> str:
     """Confirm the real DMX footprint of an instrument type (channels), or
-    remove the entry (channels omitted). scope 'document' (default, this
-    drawing) or 'global' (all drawings). Table entries win over Num Channels
-    in every Spotlight read/patch tool (footprint_source 'user')."""
+    remove the entry (channels omitted). scope 'document' (default) stores it
+    IN the drawing — worksheet resource 'vwx-mcp Footprints', travels with the
+    file; 'global' stores it on this Mac for all drawings. Entries win over
+    Num Channels in every Spotlight read/patch tool (footprint_source 'user').
+    Only after the user confirmed the value."""
     p = {"instrument_type": instrument_type, "scope": scope}
+    if save_first: p["save_first"] = True
     if channels is not None: p["channels"] = channels
     if note: p["note"] = note
     return cmd("set_footprint", p)

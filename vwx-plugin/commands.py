@@ -7057,7 +7057,7 @@ def _sl_devices(p, sl, fmap, record_footprints=False):
         rows.append(sl.device_row(_sl_raw(h, rec, fields), fmap, extra))
     if record_footprints:
         return rows
-    return sl.apply_footprints(rows, sl.load_footprints(), _sl_doc())
+    return sl.apply_footprints(rows, _sl_footprints(sl)[0], _sl_doc())
 
 
 def _sl_multi_cell_note(rows):
@@ -7082,7 +7082,8 @@ def spotlight_info(p):
     counts['lighting_device'] = len(rows)
     out = {'status': 'ok', 'document': _safe(vs.GetFName, ''),
            'field_map_version': fmap.get('version'), 'layers_scanned': len(layers),
-           'objects': counts, 'devices': sl.summarize(rows)}
+           'objects': counts, 'devices': sl.summarize(rows),
+           'footprint_table': _sl_footprints(sl)[1]}
     note = _sl_multi_cell_note(rows)
     if note:
         out['note'] = note
@@ -7139,7 +7140,7 @@ def get_lighting_device(p):
     ln = _safe(lambda: vs.GetLName(vs.GetLayer(h)), '')
     extra = _sl_place(h, ln)
     extra['schematic_view'] = bool(_safe(lambda: vs.IsLDSchematicViewObj(h), False))
-    row = sl.apply_footprints([sl.device_row(raw, fmap, extra)], sl.load_footprints(), _sl_doc())[0]
+    row = sl.apply_footprints([sl.device_row(raw, fmap, extra)], _sl_footprints(sl)[0], _sl_doc())[0]
     cells = _safe(lambda: vs.LDevice_GetCellCount(h)) or 1
     records = [_safe(lambda i=i: vs.GetName(vs.GetRecord(h, i)), '')
                for i in range(1, _safe(lambda: vs.NumRecords(h), 0) + 1)]
@@ -7182,6 +7183,77 @@ def _sl_doc():
     return _safe(vs.GetFName, '') or ''
 
 
+def _sl_save_first():
+    """Save the drawing before a write (VW crashed once mid-test and took an
+    unsaved write with it). Returns an error string, or None when saved. An
+    untitled drawing would open the Save-As dialog — refused instead."""
+    if not (_safe(vs.GetFPathName, '') or ''):
+        return 'save_first: the drawing has never been saved; save it once in Vectorworks'
+    try:
+        vs.DoMenuTextByName('Save', 0)     # as save_document: keeps path and format
+    except Exception as e:
+        return 'save_first failed: %s' % e
+    return None
+
+
+def _sl_sheet(sl):
+    """The footprint worksheet resource, or None."""
+    h = _name_obj(sl.FOOTPRINT_SHEET)
+    if h is None or _safe(lambda: vs.GetWSRowColumnCount(h)) is None:
+        return None
+    return h
+
+
+def _sl_sheet_read(sl):
+    """({type: entry}, exists, problems) from the drawing's footprint sheet."""
+    ws = _sl_sheet(sl)
+    if ws is None:
+        return {}, False, []
+    rc = _safe(lambda: vs.GetWSRowColumnCount(ws)) or (0, 0)
+    nrows = int(rc[0]) if rc else 0
+    rows = [[_safe(lambda r=r, c=c: vs.GetWSCellString(ws, r, c), '') for c in range(1, 5)]
+            for r in range(1, nrows + 1)]
+    entries, problems = sl.parse_sheet_rows(rows)
+    return entries, True, problems
+
+
+def _sl_sheet_write(sl, entries):
+    """Rewrite the whole footprint sheet (create it if missing). Not placed on
+    any layer; visible in the Resource Manager."""
+    rows = sl.sheet_rows(entries)
+    ws = _sl_sheet(sl)
+    if ws is None:
+        if _name_obj(sl.FOOTPRINT_SHEET) is not None:
+            raise ValueError('the name %r is taken by another object' % sl.FOOTPRINT_SHEET)
+        ws = vs.CreateWS(sl.FOOTPRINT_SHEET, max(2, len(rows)), len(sl.SHEET_HEADER))
+        if not ws:
+            raise ValueError('CreateWS failed')
+    have = int((_safe(lambda: vs.GetWSRowColumnCount(ws)) or (0, 0))[0])
+    if have < len(rows):
+        vs.InsertWSRows(ws, max(1, have), len(rows) - have)
+        have = len(rows)
+    for r in range(1, have + 1):
+        row = rows[r - 1] if r <= len(rows) else [''] * len(sl.SHEET_HEADER)
+        for c, text in enumerate(row, start=1):
+            vs.SetWSCellFormula(ws, r, c, r, c, text)
+    _safe(lambda: vs.RecalculateWS(ws))
+
+
+def _sl_footprints(sl):
+    """(table for footprint_lookup, info). Document entries: the drawing's
+    sheet, plus not-yet-migrated entries for this file name from the old
+    local file (the sheet wins). Global entries: the local file."""
+    doc = _sl_doc()
+    local = sl.load_footprints()
+    sheet, exists, problems = _sl_sheet_read(sl)
+    legacy = local['documents'].get(doc, {})
+    merged = dict(legacy)
+    merged.update(sheet)
+    info = {'sheet': sl.FOOTPRINT_SHEET if exists else None, 'sheet_problems': problems,
+            'legacy_entries': sorted(k for k in legacy if k not in sheet)}
+    return {'documents': {doc: merged}, 'global': local['global']}, info
+
+
 def _sl_reset(h):
     """LDevice_Reset is Spotlight's own; ResetObject is the generic fallback."""
     try:
@@ -7192,7 +7264,7 @@ def _sl_reset(h):
         return 'ResetObject'
 
 
-def _sl_write(changes, dry_run, sl, fmap, label):
+def _sl_write(changes, dry_run, sl, fmap, label, save_first=False):
     """changes = [(object_id, {canonical key: value})]. Validates everything
     first, collects handles, then mutates — nothing is written if any change
     is invalid."""
@@ -7221,7 +7293,13 @@ def _sl_write(changes, dry_run, sl, fmap, label):
         return {'error': 'nothing written: %d devices, limit %d per call' % (len(plan), _SL_MAX_WRITE)}
 
     results, mismatched = [], 0
+    saved = None
     if not dry_run and any(d for _, _, _, d, _, _ in plan):
+        if save_first:
+            err = _sl_save_first()
+            if err:
+                return {'error': 'nothing written: ' + err}
+            saved = True
         _safe(lambda: vs.NameUndoEvent(label))
     for oid, h, to_write, diff, patch, before in plan:
         r = {'object_id': oid,
@@ -7247,7 +7325,7 @@ def _sl_write(changes, dry_run, sl, fmap, label):
                 r['patch_after'] = {f2k.get(f, f): after.get(f) for f in derived}
         results.append(r)
     changed = sum(1 for _, _, _, d, _, _ in plan if d)
-    return {'status': 'ok', 'dry_run': bool(dry_run), 'devices': len(plan),
+    return {'status': 'ok', 'dry_run': bool(dry_run), 'devices': len(plan), 'saved_first': saved,
             'devices_changed' if not dry_run else 'devices_to_change': changed,
             'readback_mismatches': mismatched, 'results': results,
             'next': ('call again with dry_run=false to write' if dry_run and changed
@@ -7259,7 +7337,8 @@ def set_lighting_device_fields(p):
     """Set writable fields on lighting devices (unit, channel, universe,
     address, position, purpose, color, gobo, gobo2, dimmer, circuit_number,
     circuit_name, focus, user1). params: changes ([{object_id, fields}]) or
-    object_ids + fields; dry_run (default True). Returns per device the diff,
+    object_ids + fields; dry_run (default True); save_first (save the drawing
+    before writing, default False). Returns per device the diff,
     `previous` for restoring, and on write the read-back result."""
     sl = _slx()
     fmap = sl.load_field_map()
@@ -7270,7 +7349,7 @@ def set_lighting_device_fields(p):
     if not changes:
         return {'error': 'pass changes, or object_ids + fields'}
     return _sl_write(changes, p.get('dry_run', True) is not False, sl, fmap,
-                     'vwx-mcp: Spotlight fields')
+                     'vwx-mcp: Spotlight fields', bool(p.get('save_first')))
 
 
 def _sl_filtered(p, sl, fmap):
@@ -7289,8 +7368,8 @@ def bulk_set_lighting_fields(p):
     """Set the same fields on every device matching the filters of
     list_lighting_devices (position, layer, class_name, instrument_type,
     device_type, purpose, color, universe, patched, search, layers).
-    params: fields, filters, dry_run (default True), all_devices (required
-    when no filter is given)."""
+    params: fields, filters, dry_run (default True), save_first, all_devices
+    (required when no filter is given)."""
     sl = _slx()
     fmap = sl.load_field_map()
     flt, rows = _sl_filtered(p, sl, fmap)
@@ -7300,7 +7379,7 @@ def bulk_set_lighting_fields(p):
         return {'error': 'no devices match', 'filters': flt}
     fields = p.get('fields') or {}
     out = _sl_write([(r['object_id'], fields) for r in rows], p.get('dry_run', True) is not False,
-                    sl, fmap, 'vwx-mcp: Spotlight bulk fields')
+                    sl, fmap, 'vwx-mcp: Spotlight bulk fields', bool(p.get('save_first')))
     out['filters'] = flt
     return out
 
@@ -7336,32 +7415,61 @@ def suggest_footprints(p):
     sl = _slx()
     fmap = sl.load_field_map()
     doc = _sl_doc()
-    table = sl.load_footprints()
+    table, info = _sl_footprints(sl)
     # infer from the RECORD footprints: a table entry must not hide the evidence
     rows = _sl_devices(p, sl, fmap, record_footprints=True)
     out = sl.infer_footprints(rows)
     for e in out:
         e['table'] = sl.footprint_lookup(table, doc, e['instrument_type'])
-    return {'status': 'ok', 'document': doc, 'types': out,
+    out_ = {'status': 'ok', 'document': doc, 'types': out,
             'suggestions': sum(1 for e in out if e['suggested'] and not e['table'])}
+    out_.update(info)
+    return out_
 
 
 def set_footprint(p):
     """Confirm the real footprint (DMX channels) of an instrument type, or
-    remove it (channels null). The table wins over Num Channels for every
-    read and patch tool. params: instrument_type, channels, scope
-    ('document' default — this drawing only — or 'global'), note."""
+    remove it (channels null). Wins over Num Channels in every read and patch
+    tool. params: instrument_type, channels, scope ('document' default: stored
+    IN the drawing, worksheet resource 'vwx-mcp Footprints' — travels with the
+    file; 'global': local file on this Mac, all drawings), note, save_first."""
     import time
     sl = _slx()
     doc = _sl_doc()
-    table = sl.load_footprints()
+    key = str(p.get('instrument_type') or '').strip()
+    scope = p.get('scope') or 'document'
+    when = time.strftime('%Y-%m-%d %H:%M')
+    if key.startswith(('=', '+', '-', '@')):
+        return {'error': 'instrument_type may not start with = + - @ (worksheet formula)'}
+    local = sl.load_footprints()
     try:
-        sl.set_footprint(table, doc, p.get('instrument_type'), p.get('channels'),
-                         p.get('scope') or 'document', p.get('note'),
-                         time.strftime('%Y-%m-%d %H:%M'))
-        sl.save_footprints(table)
+        if scope == 'global':
+            sl.set_footprint(local, doc, key, p.get('channels'), 'global', p.get('note'), when)
+            sl.save_footprints(local)
+            migrated = []
+        else:
+            if p.get('save_first'):
+                err = _sl_save_first()
+                if err:
+                    return {'error': 'nothing written: ' + err}
+            sheet, _, problems = _sl_sheet_read(sl)
+            if problems:
+                return {'error': 'footprint sheet has problems; fix them in Vectorworks first',
+                        'sheet_problems': problems}
+            legacy = local['documents'].get(doc, {})
+            migrated = sorted(k for k in legacy if k not in sheet)
+            entries = dict(legacy)
+            entries.update(sheet)
+            t = {'documents': {doc: entries}, 'global': {}}
+            sl.set_footprint(t, doc, key, p.get('channels'), 'document', p.get('note'), when)
+            _sl_sheet_write(sl, t['documents'][doc])
+            if doc in local['documents']:          # migrated into the drawing
+                del local['documents'][doc]
+                sl.save_footprints(local)
     except (ValueError, OSError) as e:
         return {'error': str(e)}
-    return {'status': 'ok', 'document': doc, 'instrument_type': p.get('instrument_type'),
-            'entry': sl.footprint_lookup(table, doc, p.get('instrument_type')),
-            'scope': p.get('scope') or 'document'}
+    table, info = _sl_footprints(sl)
+    out = {'status': 'ok', 'document': doc, 'instrument_type': key, 'scope': scope,
+           'entry': sl.footprint_lookup(table, doc, key), 'migrated_from_local_file': migrated}
+    out.update(info)
+    return out

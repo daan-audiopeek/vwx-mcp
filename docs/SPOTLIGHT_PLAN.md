@@ -212,14 +212,27 @@ back as `changes` restores. Whether Cmd+Z undoes bridge writes is **unknown**
 (the modal dialog may make the whole bridge session one undo step) — live test.
 No overlap check on write yet: that is `check_patch` in phase 3.
 
-Footprint table: `spotlight_footprints.json` next to `commands.py` (local to
-the Mac, not in the repo, not overwritten by the installer). Key = instrument
-type (fallback: symbol name); per document, then global. Precedence in every
-read tool: table (`user`) > `Num Channels` with GDTF mode (`gdtf_mode`) >
-`Num Channels` (`record_unverified`). `suggest_footprints` always infers from
-the record values, so a table entry never hides the evidence. On the
-Franciscus data it suggests exactly 5 (Cameo TS60, 6 devices, record 13) and
-10 (FOS IQ Par, 8 devices, record 18), confidence high.
+Footprint table. **Document scope** (default): worksheet resource
+`vwx-mcp Footprints` inside the drawing — columns Instrument type, Channels,
+Note, Confirmed; not placed on any layer; travels with the file, so a copy or
+rename keeps it. A hand-edited sheet is parsed; bad rows are reported
+(`sheet_problems`) and block `set_footprint` until fixed. **Global scope**:
+`spotlight_footprints.json` next to `commands.py` (local to the Mac). Entries
+the first version stored per file name in that local file are still read
+(`legacy_entries`) and move into the drawing's sheet on the next
+`set_footprint`. Key = instrument type (fallback: symbol name). Precedence in
+every read tool: document sheet > global (`user`) > `Num Channels` with GDTF
+mode (`gdtf_mode`) > `Num Channels` (`record_unverified`).
+`suggest_footprints` always infers from the record values, so an entry never
+hides the evidence. On the Franciscus data it suggests exactly 5 (Cameo TS60,
+6 devices, record 13) and 10 (FOS IQ Par, 8 devices, record 18), confidence
+high.
+
+`save_first` (write tools and `set_footprint`): saves the drawing with the
+Save menu command before the first write of a call, only when something will
+actually change; refused for a never-saved drawing (Save would open the
+Save-As dialog). Default off: saving also removes "revert to saved" as a way
+back. Added after VW crashed once mid-test and lost an unsaved write.
 
 Built 2026-10-17: 28 tests green, smoke-tested against a fake `vs` (diff,
 write, read-back, restore via `previous`, invalid-field refusal, footprint

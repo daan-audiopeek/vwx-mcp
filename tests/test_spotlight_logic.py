@@ -263,5 +263,28 @@ class FootprintTest(unittest.TestCase):
             sl.set_footprint(t, 'D', 'X', 5, scope='world')
 
 
+class FootprintSheetTest(unittest.TestCase):
+    def test_roundtrip(self):
+        entries = {'Trek10 type': {'channels': 5, 'note': 'spacing', 'confirmed': '2026-10-17'},
+                   'Trek6 type': {'channels': 10}}
+        rows = sl.sheet_rows(entries)
+        self.assertEqual(rows[0], sl.SHEET_HEADER)
+        self.assertEqual([r[0] for r in rows[1:]], ['Trek6 type', 'Trek10 type'])
+        back, problems = sl.parse_sheet_rows(rows)
+        self.assertEqual(problems, [])
+        self.assertEqual(back['Trek10 type']['channels'], 5)
+        self.assertEqual(back['Trek10 type']['note'], 'spacing')
+        self.assertIsNone(back['Trek6 type']['note'])
+
+    def test_hand_edited_sheet(self):
+        rows = [sl.SHEET_HEADER, ['A', '10,00', '', ''], ['B', 'ten', '', ''],
+                ['', '5', '', ''], ['', '', '', ''], ['A', '12', '', ''], ['C', '0', '', ''],
+                ['D', '7.5', '', ''], ['E', '513', '', ''], ['F', ' 3 ']]
+        back, problems = sl.parse_sheet_rows(rows)
+        self.assertEqual(sorted(back), ['A', 'F'])
+        self.assertEqual(back['A']['channels'], 10)
+        self.assertEqual(len(problems), 6)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -460,3 +460,47 @@ def infer_footprints(rows):
                                    % (same, smallest, '/'.join(map(str, rec)) or '?'))
         out.append(entry)
     return out
+
+
+# ── footprints stored in the drawing (worksheet resource) ───────────────────
+# Document-scope footprints live in a worksheet resource inside the .vwx, so
+# they travel with the file and survive a rename or copy; 'global' entries
+# stay in spotlight_footprints.json on the Mac. One row per instrument type.
+
+FOOTPRINT_SHEET = 'vwx-mcp Footprints'
+SHEET_HEADER = ['Instrument type', 'Channels', 'Note', 'Confirmed']
+
+
+def sheet_rows(entries):
+    """{type: entry} -> list of 4-string rows, header first, natural order."""
+    rows = [list(SHEET_HEADER)]
+    for k in sorted(entries, key=natural_key):
+        e = entries[k]
+        rows.append([k, str(e['channels']), e.get('note') or '', e.get('confirmed') or ''])
+    return rows
+
+
+def parse_sheet_rows(rows):
+    """Displayed cell strings (rows of lists) -> ({type: entry}, [problems]).
+    The sheet may have been edited by hand in Vectorworks: bad rows are
+    reported and skipped, never guessed. Channels may display as '10' or '10,00'."""
+    entries, problems = {}, []
+    for i, row in enumerate(rows, start=1):
+        cells = [str(c or '').strip() for c in (list(row) + ['', '', '', ''])[:4]]
+        key, ch, note, when = cells
+        if i == 1 and key == SHEET_HEADER[0]:
+            continue
+        if not key:
+            if ch:
+                problems.append('row %d: channels without instrument type' % i)
+            continue
+        n = parse_number(ch)
+        if n is None or n != int(n) or not 1 <= n <= 512:
+            problems.append('row %d (%s): channels %r is not 1..512' % (i, key, ch))
+            continue
+        if key in entries:
+            problems.append('row %d (%s): duplicate, first row wins' % (i, key))
+            continue
+        entries[key] = {'channels': int(n), 'source': 'user', 'note': note or None,
+                        'confirmed': when or None}
+    return entries, problems
