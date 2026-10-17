@@ -242,9 +242,10 @@ From the phase-0 discovery on one real plot (VW 2026 31.3.0, Dutch UI,
 
 | Symptom | Cause | Do this instead |
 |---|---|---|
+| **Vectorworks crashes** (process gone, bridge says "Empty response", no exception) | `vs.LDevice_GetParamStr(h, 0, -1, '__Version')` — an internal `'__'` field | **never** pass a `'__…'` name to `LDevice_GetParam*`; read those with `GetRField` (147 other fields, all getter types and unknown names were safe) |
 | Device fields come from the wrong record | devices carry 3 records, the first is `NNA_TIfcFlowTerminal` (IFC), then `EntEquipUniversal`, then `Lighting Device` | read by record **name** `'Lighting Device'`, never `GetRecord(h, 1)` |
 | `LDevice_GetParamStr` returns `'_\x01'` | Str getter on an **int** field returns the raw bytes (351 = 0x015F) | use the getter matching the field type (`GetFldType` 1 → `GetParamLong`) or read the record with `GetRField` |
-| `LDevice_GetParam*` returns `''`/`0` for a field that has a value (`Inst Type`, `Num Channels`) | the universal name differs from the record field name; unknown names fail **silently** (no error dialog, no exception) | primary read path = `GetRField(h, 'Lighting Device', field)`; `LDevice_*` only for cells/accessories |
+| `LDevice_GetParam*` returns `''`/`0` for a field that has a value (`Inst Type`, `Device Type`, `Wattage`, `Symbol Name`, `Num Channels`) | the universal name differs from the record field name; unknown names fail **silently** (no error dialog, no exception) | primary read path = `GetRField(h, 'Lighting Device', field)`; `LDevice_*` only for cells/accessories |
 | Hanging positions not found as `Hanging Position` | the PIO is `Light Position Obj`; truss is `TrussItem` | use the PIO names from the field map |
 | Devices "inside" a position | they are not nested — parent is the layer; link is the text field `Position` = position's `Position Name` | match by name |
 | Numbers/booleans don't parse | `GetRField` returns locale text: decimal comma (`0,61`), localized booleans, units (`41°`) | parse with a locale-aware helper; booleans by field type 2 |

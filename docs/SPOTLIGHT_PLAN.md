@@ -112,7 +112,23 @@ universal names fail silently, they do not pop a dialog). Field map:
   (no anonymize needed; not for the repo) to establish which record fields
   `LDevice_GetParam*` accepts.
 
-Still open for phase 0: rerun probe; one multi-cell device and one device with
+### Results, run 2 (probe "one", 2026-10-17)
+
+- **`LDevice_GetParamStr(h, 0, -1, '__Version')` crashes Vectorworks** (process
+  gone, no exception, no dump written). Isolated by the local session with a
+  per-call fsync log. Run 1 only survived because it probed the IFC record's
+  fields. Fix: `_sl_probe_names` drops every `'__'` name, also from
+  user-supplied candidates. Not tested: the other `'__'` fields — not needed,
+  `GetRField` reads them.
+- Safe: Str on the 147 other fields, Long on type 1, Real on 3/7/20, Bool on
+  type 2, all getters on unknown names, and on the button fields.
+- `LDevice_GetParam*` agrees with the record for Position, Unit Number,
+  Universe, UniverseAddress, DMX/Absolute Address, Color, UID, Z Location
+  (Real, plain number). It returns `''` for Inst Type, Device Type, Wattage,
+  Symbol Name although the record has values → **GetRField is the read path**,
+  `LDevice_*` only where cells/accessories force it. Field map v2.
+
+Still open for phase 0: one multi-cell device and one device with
 an accessory (in a copy); a GDTF device with a mode set, to see whether
 `Num Channels` follows the mode.
 

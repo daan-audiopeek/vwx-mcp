@@ -6765,9 +6765,11 @@ def datatag_refresh_all(p):
 # no macOS privacy prompt, unlike ~/Desktop); only a summary goes over the bridge.
 #
 # Scans one design layer at a time (no unscoped document-wide ForEachObject,
-# see resource_delete). LDevice_GetParam* with an unknown universal name may
-# raise VW's engine-error dialog, and on macOS nothing auto-dismisses it — so
-# probing is opt-in: probe='one' (first device) before probe='all'.
+# see resource_delete). Probing is opt-in: probe='one' (first device) before
+# probe='all'. Unknown universal names fail silently (''/0), but
+# LDevice_GetParamStr(h, 0, -1, '__Version') CRASHES Vectorworks outright
+# (no exception, process gone; measured 2026-10-17, VW 2026 31.3). Internal
+# '__' fields are therefore never probed — see _sl_probe_names.
 
 _SL_KIND = re.compile(r'light|position|focus|truss|legend|hoist|accessor|screen|'
                       r'cable|distribut|dmx|instrument|lamp|fixture|pipe|boom', re.I)
@@ -6814,6 +6816,13 @@ def _sl_records(h, anon):
     return vals, types
 
 
+def _sl_probe_names(names):
+    """Unique probe names without internal '__' fields: LDevice_GetParamStr on
+    '__Version' crashes VW (see section header). Also applied to user-supplied
+    candidates, on purpose — there is no safe way to try one."""
+    return [n for n in dict.fromkeys(names) if n and not str(n).startswith('__')]
+
+
 def _sl_probe(h, names, cell=0, acc=-1, anon=False, types=None):
     """LDevice_GetParam* per universal name: {name: {str, long?, real?, bool?}}.
     Str is always read. The typed getter follows the record field type when the
@@ -6822,7 +6831,7 @@ def _sl_probe(h, names, cell=0, acc=-1, anon=False, types=None):
     read is what tells us whether the name is accepted. Unknown types get Long+Real."""
     out = {}
     types = types or {}
-    for n in names:
+    for n in _sl_probe_names(names):
         sv = _safe(lambda n=n: vs.LDevice_GetParamStr(h, cell, acc, n), '<err>')
         r = {'str': _sl_anon(sv) if anon and sv != '<err>' else sv}
         t = types.get(n)
@@ -6927,9 +6936,9 @@ def spotlight_discover(p):
     probed = 0
     dev_rec = 'Lighting Device'
     if probe != 'none' and devices:
-        names = list(dict.fromkeys(
+        names = _sl_probe_names(
             list((devices[0]['records'].get(dev_rec) or {}).keys())
-            + _SL_CANDIDATES + list(p.get('candidates') or [])))
+            + _SL_CANDIDATES + list(p.get('candidates') or []))
         types = devices[0]['field_types'].get(dev_rec) or {}
         for row in (devices[:1] if probe == 'one' else devices):
             h = _h(row['object_id'])

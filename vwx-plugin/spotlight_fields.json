@@ -1,6 +1,6 @@
 {
-  "_about": "Canonical Spotlight field map (phase 0 of docs/SPOTLIGHT_PLAN.md). Spotlight verbs read names from here, never from literals. Source: docs/discovery/franciscus_probe_all_anon.json (VW 2026 31.3.0, Dutch UI, 36 single-cell devices, no accessories). 'type' = vs.GetFldType code (1 int, 2 bool, 3 real, 4 text, 7 dimension, 8 popup, 14/20 angle, 30 resource). Read with vs.GetRField(h, record, field): always a string, locale-formatted (decimal comma, localized booleans, units like '41°'). 'ldevice' = universal name for LDevice_GetParam* where the probe proved it; null = not proven (that probe ran against the wrong record and must be rerun).",
-  "version": 1,
+  "_about": "Canonical Spotlight field map (phase 0 of docs/SPOTLIGHT_PLAN.md). Spotlight verbs read names from here, never from literals. Source: docs/discovery/franciscus_probe_all_anon.json (VW 2026 31.3.0, Dutch UI, 36 single-cell devices, no accessories). 'type' = vs.GetFldType code (1 int, 2 bool, 3 real, 4 text, 7 dimension, 8 popup, 14/20 angle, 30 resource). Read with vs.GetRField(h, record, field): always a string, locale-formatted (decimal comma, localized booleans, units like '41°'). 'ldevice' = universal name LDevice_GetParam* returned the record value for (probe run 2, first device, cell 0, acc -1); null = returned ''/0 although the record had a value, or not checkable (field empty). Primary read path is GetRField; LDevice_* only for cells/accessories. NEVER pass a '__' field to LDevice_GetParam*: '__Version' crashes VW.",
+  "version": 2,
   "pio": {
     "lighting_device": "Lighting Device",
     "hanging_position": "Light Position Obj",
@@ -17,11 +17,11 @@
     "universe":         {"field": "Universe",          "type": 4,  "ldevice": "Universe"},
     "address":          {"field": "DMX Address",       "type": 1,  "ldevice": "DMX Address"},
     "absolute_address": {"field": "Absolute Address",  "type": 1,  "ldevice": "Absolute Address", "note": "= (universe-1)*512 + address, held for all 36 devices"},
-    "universe_address": {"field": "UniverseAddress",   "type": 4,  "ldevice": null, "note": "'u/a', '0/0' when unpatched"},
+    "universe_address": {"field": "UniverseAddress",   "type": 4,  "ldevice": "UniverseAddress", "note": "'u/a', '0/0' when unpatched"},
     "footprint":        {"field": "Num Channels",      "type": 1,  "ldevice": null, "note": "LDevice_GetParamLong('Num Channels') returned 0 while the record holds 13 - read the record. Whether it follows the chosen mode is unverified (Fixture Mode was empty on all devices)"},
     "position":         {"field": "Position",          "type": 4,  "ldevice": "Position", "note": "link to Light Position Obj 'Position Name' by text; devices are NOT nested in the position (parent = layer)"},
     "purpose":          {"field": "Purpose",           "type": 4,  "ldevice": null},
-    "instrument_type":  {"field": "Inst Type",         "type": 4,  "ldevice": null, "note": "LDevice_GetParamStr('Inst Type') returned '' while the record had a value"},
+    "instrument_type":  {"field": "Inst Type",         "type": 4,  "ldevice": null, "note": "LDevice_GetParamStr returned '' while the record had a value (same for Device Type, Wattage, Symbol Name)"},
     "device_type":      {"field": "Device Type",       "type": 8,  "ldevice": null},
     "fixture_id":       {"field": "FixtureID",         "type": 4,  "ldevice": null},
     "fixture_mode":     {"field": "Fixture Mode",      "type": 8,  "ldevice": null},
@@ -38,9 +38,9 @@
     "weight":           {"field": "Weight",            "type": 4,  "ldevice": null},
     "symbol":           {"field": "Symbol Name",       "type": 4,  "ldevice": null},
     "uid":              {"field": "UID",               "type": 4,  "ldevice": "UID"},
-    "z":                {"field": "Z Location",        "type": 7,  "ldevice": null},
-    "cells":            {"field": "__CellsCount",      "type": 1,  "ldevice": null, "note": "matches LDevice_GetCellCount"},
-    "accessories":      {"field": "__AccessoriesCount","type": 1,  "ldevice": null},
+    "z":                {"field": "Z Location",        "type": 7,  "ldevice": "Z Location", "note": "GetParamReal gives a plain number (1450); the record text carries units/locale"},
+    "cells":            {"field": "__CellsCount",      "type": 1,  "ldevice": null, "note": "matches LDevice_GetCellCount; read via GetRField only ('__' field)"},
+    "accessories":      {"field": "__AccessoriesCount","type": 1,  "ldevice": null, "note": "GetRField only ('__' field)"},
     "user1":            {"field": "User Field 1",      "type": 4,  "ldevice": null}
   },
   "hanging_position": {
