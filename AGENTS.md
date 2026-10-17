@@ -234,6 +234,22 @@ IFC gotchas (verified live):
 Gotcha: the `…N` GIS functions return **`(ok, value…)`** tuples with a leading
 boolean — `_nums()` in commands.py strips flags generically.
 
+## Spotlight (lighting devices) — verified facts
+
+From the phase-0 discovery on one real plot (VW 2026 31.3.0, Dutch UI,
+36 single-cell devices; dump in `docs/discovery/`). Field names live in
+`vwx-plugin/spotlight_fields.json` — use that map, not literals.
+
+| Symptom | Cause | Do this instead |
+|---|---|---|
+| Device fields come from the wrong record | devices carry 3 records, the first is `NNA_TIfcFlowTerminal` (IFC), then `EntEquipUniversal`, then `Lighting Device` | read by record **name** `'Lighting Device'`, never `GetRecord(h, 1)` |
+| `LDevice_GetParamStr` returns `'_\x01'` | Str getter on an **int** field returns the raw bytes (351 = 0x015F) | use the getter matching the field type (`GetFldType` 1 → `GetParamLong`) or read the record with `GetRField` |
+| `LDevice_GetParam*` returns `''`/`0` for a field that has a value (`Inst Type`, `Num Channels`) | the universal name differs from the record field name; unknown names fail **silently** (no error dialog, no exception) | primary read path = `GetRField(h, 'Lighting Device', field)`; `LDevice_*` only for cells/accessories |
+| Hanging positions not found as `Hanging Position` | the PIO is `Light Position Obj`; truss is `TrussItem` | use the PIO names from the field map |
+| Devices "inside" a position | they are not nested — parent is the layer; link is the text field `Position` = position's `Position Name` | match by name |
+| Numbers/booleans don't parse | `GetRField` returns locale text: decimal comma (`0,61`), localized booleans, units (`41°`) | parse with a locale-aware helper; booleans by field type 2 |
+| Universe/address storage | `Universe` (text), `DMX Address` (int), `Absolute Address` = (u-1)·512+a, `UniverseAddress` `'u/a'` (`'0/0'` unpatched), footprint `Num Channels` | write `Universe` + `DMX Address`, verify the derived fields by read-back (untested) |
+
 ## Server internals (for tool authors)
 
 - **`@mcp.tool(output_schema=None)`**, never `structured_output=False`. The server

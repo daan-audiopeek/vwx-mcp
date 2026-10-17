@@ -6783,8 +6783,6 @@ _SL_CANDIDATES = [
     'Weight', 'Frame Size', 'Field Angle', 'Beam Angle', 'Lamp', 'UID',
     'GDTF Fixture', 'GDTF Mode', 'Inventory Type', 'User Field 1',
 ]
-_SL_NUMERIC = re.compile(r'unit|channel|universe|address|footprint|num |'
-                         r'wattage|weight|angle|id$', re.I)
 
 
 def _sl_anon(v):
@@ -6797,7 +6795,9 @@ def _sl_anon(v):
 
 
 def _sl_records(h, anon):
-    """All records on h: {record: {field: value}} plus {record: {field: type}}."""
+    """All records on h: {record: {field: value}} plus {record: {field: type}}.
+    Field type 2 (boolean) stays readable under anon: its text is localized
+    (True/Wahr/Waar/Onwaar...), carries no project data, and is needed to map it."""
     vals, types = {}, {}
     for i in range(1, _safe(lambda: vs.NumRecords(h), 0) + 1):
         rh = _safe(lambda i=i: vs.GetRecord(h, i))
@@ -6808,21 +6808,30 @@ def _sl_records(h, anon):
         for j in range(1, _safe(lambda: vs.NumFields(rh), 0) + 1):
             fn = _safe(lambda j=j: vs.GetFldName(rh, j)) or 'f%d' % j
             v = _safe(lambda fn=fn: vs.GetRField(h, rn, fn), '')
-            fv[fn] = _sl_anon(v) if anon else v
             ft[fn] = _safe(lambda j=j: vs.GetFldType(rh, j))
+            fv[fn] = _sl_anon(v) if anon and ft[fn] != 2 else v
         vals[rn], types[rn] = fv, ft
     return vals, types
 
 
-def _sl_probe(h, names, cell=0, acc=-1, anon=False):
-    """LDevice_GetParam* per universal name: {name: {str, long?, real?}}."""
+def _sl_probe(h, names, cell=0, acc=-1, anon=False, types=None):
+    """LDevice_GetParam* per universal name: {name: {str, long?, real?, bool?}}.
+    Str is always read. The typed getter follows the record field type when the
+    name is a record field (1 int -> Long, 2 bool -> Bool, 3/7/20 real -> Real):
+    Str on an int field returns the raw bytes ('_\x01' for 351), so the typed
+    read is what tells us whether the name is accepted. Unknown types get Long+Real."""
     out = {}
+    types = types or {}
     for n in names:
         sv = _safe(lambda n=n: vs.LDevice_GetParamStr(h, cell, acc, n), '<err>')
         r = {'str': _sl_anon(sv) if anon and sv != '<err>' else sv}
-        if _SL_NUMERIC.search(n):
+        t = types.get(n)
+        if t == 1 or t is None:
             r['long'] = _safe(lambda n=n: vs.LDevice_GetParamLong(h, cell, acc, n), '<err>')
+        if t in (3, 7, 20) or t is None:
             r['real'] = _safe(lambda n=n: vs.LDevice_GetParamReal(h, cell, acc, n), '<err>')
+        if t == 2:
+            r['bool'] = _safe(lambda n=n: vs.LDevice_GetParamBool(h, cell, acc, n), '<err>')
         out[n] = r
     return out
 
@@ -6916,25 +6925,25 @@ def spotlight_discover(p):
 
     # Probe universal names on device rows (opt-in, see header).
     probed = 0
+    dev_rec = 'Lighting Device'
     if probe != 'none' and devices:
-        dev_rec = next(iter(devices[0]['records']), None)
         names = list(dict.fromkeys(
             list((devices[0]['records'].get(dev_rec) or {}).keys())
             + _SL_CANDIDATES + list(p.get('candidates') or [])))
+        types = devices[0]['field_types'].get(dev_rec) or {}
         for row in (devices[:1] if probe == 'one' else devices):
             h = _h(row['object_id'])
             if h is None:
                 continue
-            row['probe'] = {'device': _sl_probe(h, names, anon=anon)}
+            row['probe'] = {'device': _sl_probe(h, names, anon=anon, types=types)}
             for c in range(1, row.get('cell_count') or 1):
-                row['probe']['cell_%d' % c] = _sl_probe(h, names, cell=c, anon=anon)
+                row['probe']['cell_%d' % c] = _sl_probe(h, names, cell=c, anon=anon, types=types)
             for c, n_acc in enumerate(row['acc_count_per_cell']):
                 for a in range(n_acc or 0):
-                    row['probe']['cell_%d_acc_%d' % (c, a)] = _sl_probe(h, names, c, a, anon)
+                    row['probe']['cell_%d_acc_%d' % (c, a)] = _sl_probe(h, names, c, a, anon, types)
             probed += 1
 
     dev_kinds = sorted({d['pio'] for d in devices})
-    dev_rec = next(iter(devices[0]['records']), None) if devices else None
     dump = {
         'tool': 'spotlight_discover', 'version': 1,
         'vw_version': _safe(lambda: list(vs.GetVersion())),

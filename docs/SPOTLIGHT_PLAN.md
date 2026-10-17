@@ -82,6 +82,33 @@ Output: a field map committed as `vwx-plugin/spotlight_fields.json`
 in AGENTS.md's gotcha table. Everything after this phase reads names from that
 map, never from string literals scattered through the verbs.
 
+### Results, run 1 (Franciscus main drawing, 2026-10-17)
+
+Dump: `docs/discovery/franciscus_probe_all_anon.json`. VW 2026 31.3.0, Dutch
+UI, 7 design layers, 1.5–1.9 s per full scan, no error dialogs (unknown
+universal names fail silently, they do not pop a dialog). Field map:
+`vwx-plugin/spotlight_fields.json`; gotchas in AGENTS.md ("Spotlight").
+
+- 36 `Lighting Device`, 46 `Light Position Obj`, 92 `TrussItem`, 1 `Video Screen`.
+  All devices single-cell, no accessories → cells/accessories still unverified.
+- Patch is in use: universes 1–4, footprints 2–90. **Channel, Purpose, Dimmer,
+  Circuit, Focus are empty on every device.**
+- Raw numbers already show the QC case: in universe 1, eight 18-ch devices
+  start every 10 addresses (185, 195, …, 255) and six 13-ch devices every 5
+  (351, 356, …, 376) → overlapping ranges per `Num Channels`. Either those
+  fixtures run a smaller mode than the record says (`Fixture Mode` is empty
+  on all devices), or the patch overlaps. To be confirmed with the user.
+- 2 devices are unpatched (`0/0`), no unit number, no position.
+- Script bug found and fixed: the first run took the IFC record as "the device
+  record", so `device_field_stats` and the field-name probe are wrong in this
+  dump. Record values are complete and correct. **Rerun `{"probe": "one"}`**
+  (no anonymize needed; not for the repo) to establish which record fields
+  `LDevice_GetParam*` accepts.
+
+Still open for phase 0: rerun probe; one multi-cell device and one device with
+an accessory (in a copy); a GDTF device with a mode set, to see whether
+`Num Channels` follows the mode.
+
 ## 3. Architecture
 
 - **`vwx-plugin/spotlight_logic.py`** (new, pure Python, no `import vs`):

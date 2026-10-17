@@ -1,0 +1,54 @@
+{
+  "_about": "Canonical Spotlight field map (phase 0 of docs/SPOTLIGHT_PLAN.md). Spotlight verbs read names from here, never from literals. Source: docs/discovery/franciscus_probe_all_anon.json (VW 2026 31.3.0, Dutch UI, 36 single-cell devices, no accessories). 'type' = vs.GetFldType code (1 int, 2 bool, 3 real, 4 text, 7 dimension, 8 popup, 14/20 angle, 30 resource). Read with vs.GetRField(h, record, field): always a string, locale-formatted (decimal comma, localized booleans, units like '41°'). 'ldevice' = universal name for LDevice_GetParam* where the probe proved it; null = not proven (that probe ran against the wrong record and must be rerun).",
+  "version": 1,
+  "pio": {
+    "lighting_device": "Lighting Device",
+    "hanging_position": "Light Position Obj",
+    "truss": "TrussItem",
+    "video_screen": "Video Screen"
+  },
+  "records": {
+    "lighting_device": "Lighting Device",
+    "hanging_position": "Light Position Obj"
+  },
+  "lighting_device": {
+    "unit":             {"field": "Unit Number",       "type": 4,  "ldevice": "Unit Number"},
+    "channel":          {"field": "Channel",           "type": 4,  "ldevice": null},
+    "universe":         {"field": "Universe",          "type": 4,  "ldevice": "Universe"},
+    "address":          {"field": "DMX Address",       "type": 1,  "ldevice": "DMX Address"},
+    "absolute_address": {"field": "Absolute Address",  "type": 1,  "ldevice": "Absolute Address", "note": "= (universe-1)*512 + address, held for all 36 devices"},
+    "universe_address": {"field": "UniverseAddress",   "type": 4,  "ldevice": null, "note": "'u/a', '0/0' when unpatched"},
+    "footprint":        {"field": "Num Channels",      "type": 1,  "ldevice": null, "note": "LDevice_GetParamLong('Num Channels') returned 0 while the record holds 13 - read the record. Whether it follows the chosen mode is unverified (Fixture Mode was empty on all devices)"},
+    "position":         {"field": "Position",          "type": 4,  "ldevice": "Position", "note": "link to Light Position Obj 'Position Name' by text; devices are NOT nested in the position (parent = layer)"},
+    "purpose":          {"field": "Purpose",           "type": 4,  "ldevice": null},
+    "instrument_type":  {"field": "Inst Type",         "type": 4,  "ldevice": null, "note": "LDevice_GetParamStr('Inst Type') returned '' while the record had a value"},
+    "device_type":      {"field": "Device Type",       "type": 8,  "ldevice": null},
+    "fixture_id":       {"field": "FixtureID",         "type": 4,  "ldevice": null},
+    "fixture_mode":     {"field": "Fixture Mode",      "type": 8,  "ldevice": null},
+    "gdtf_fixture":     {"field": "GDTF Fixture Name", "type": 8,  "ldevice": null},
+    "gdtf_mode":        {"field": "GDTF Fixture Mode", "type": 14, "ldevice": null},
+    "color":            {"field": "Color",             "type": 4,  "ldevice": "Color"},
+    "gobo":             {"field": "Template",          "type": 4,  "ldevice": null},
+    "gobo2":            {"field": "Template2",         "type": 4,  "ldevice": null},
+    "dimmer":           {"field": "Dimmer",            "type": 4,  "ldevice": null},
+    "circuit_number":   {"field": "Circuit Number",    "type": 4,  "ldevice": null},
+    "circuit_name":     {"field": "Circuit Name",      "type": 4,  "ldevice": null},
+    "focus":            {"field": "Focus",             "type": 4,  "ldevice": null},
+    "wattage":          {"field": "Wattage",           "type": 4,  "ldevice": null},
+    "weight":           {"field": "Weight",            "type": 4,  "ldevice": null},
+    "symbol":           {"field": "Symbol Name",       "type": 4,  "ldevice": null},
+    "uid":              {"field": "UID",               "type": 4,  "ldevice": "UID"},
+    "z":                {"field": "Z Location",        "type": 7,  "ldevice": null},
+    "cells":            {"field": "__CellsCount",      "type": 1,  "ldevice": null, "note": "matches LDevice_GetCellCount"},
+    "accessories":      {"field": "__AccessoriesCount","type": 1,  "ldevice": null},
+    "user1":            {"field": "User Field 1",      "type": 4,  "ldevice": null}
+  },
+  "hanging_position": {
+    "name":             {"field": "Position Name",     "type": 4},
+    "start_number":     {"field": "StartNum",          "type": 1},
+    "increment":        {"field": "Increment",         "type": 1},
+    "direction":        {"field": "Direction",         "type": 8},
+    "numbering_style":  {"field": "Numbering Style",   "type": 8},
+    "hung_weight":      {"field": "TotalHungWeight",   "type": 14}
+  }
+}
