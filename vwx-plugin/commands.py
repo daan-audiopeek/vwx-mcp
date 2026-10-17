@@ -7212,35 +7212,41 @@ def _sl_write(changes, dry_run, sl, fmap, label):
         if errs:
             errors.append({'object_id': oid, 'errors': errs})
             continue
-        before = _sl_raw(h, rec, list(to_write))
-        plan.append((oid, h, to_write, sl.diff_device(before, to_write)))
+        before = _sl_raw(h, rec, list(to_write) + derived)
+        plan.append((oid, h, to_write, sl.diff_device(before, to_write),
+                     sl.derived_patch(before, to_write, fmap), before))
     if errors:
         return {'error': 'nothing written: invalid changes', 'invalid': errors}
     if len(plan) > _SL_MAX_WRITE:
         return {'error': 'nothing written: %d devices, limit %d per call' % (len(plan), _SL_MAX_WRITE)}
 
     results, mismatched = [], 0
-    if not dry_run and any(d for _, _, _, d in plan):
+    if not dry_run and any(d for _, _, _, d, _, _ in plan):
         _safe(lambda: vs.NameUndoEvent(label))
-    for oid, h, to_write, diff in plan:
+    for oid, h, to_write, diff, patch, before in plan:
         r = {'object_id': oid,
              'unit': _safe(lambda: vs.GetRField(h, rec, fmap['lighting_device']['unit']['field']), ''),
              'position': _safe(lambda: vs.GetRField(h, rec, fmap['lighting_device']['position']['field']), ''),
              'changes': {f2k.get(f, f): {'old': o, 'new': n} for f, (o, n) in diff.items()},
              'previous': {f2k.get(f, f): o for f, (o, n) in diff.items()}}
+        # Absolute Address / UniverseAddress are written alongside: Spotlight
+        # does not recompute them after SetRField + LDevice_Reset.
+        expected = dict({f: n for f, (_, n) in diff.items()}, **patch) if diff else {}
+        if dry_run and diff and any(f in diff for f in derived):
+            r['patch_expected'] = {f2k.get(f, f): expected.get(f, before.get(f)) for f in derived}
         if diff and not dry_run:
-            for f, (_, n) in diff.items():
+            for f, n in expected.items():
                 vs.SetRField(h, rec, f, n)
             r['reset'] = _sl_reset(h)
             after = _sl_raw(h, rec, list(to_write) + derived)
-            bad = sl.readback_mismatches(after, {f: n for f, (_, n) in diff.items()})
+            bad = sl.readback_mismatches(after, expected)
             if bad:
                 r['readback_mismatch'] = {f2k.get(f, f): v for f, v in bad.items()}
                 mismatched += 1
             if any(f in diff for f in derived):
                 r['patch_after'] = {f2k.get(f, f): after.get(f) for f in derived}
         results.append(r)
-    changed = sum(1 for _, _, _, d in plan if d)
+    changed = sum(1 for _, _, _, d, _, _ in plan if d)
     return {'status': 'ok', 'dry_run': bool(dry_run), 'devices': len(plan),
             'devices_changed' if not dry_run else 'devices_to_change': changed,
             'readback_mismatches': mismatched, 'results': results,

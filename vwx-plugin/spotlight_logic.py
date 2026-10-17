@@ -278,8 +278,8 @@ def validate_fields(fields, fmap):
     """{canonical key: value} -> ({record field: text to write}, [errors]).
     None or '' clears a field. universe and address must be whole numbers
     (universe 0..32767, address 0..512; 0 or '' unpatches). Universe and
-    address may be set on their own; the read-back shows what Spotlight made
-    of it."""
+    address may be set on their own; derived_patch keeps Absolute Address
+    and UniverseAddress in step."""
     out, errors = {}, []
     spec = fmap['lighting_device']
     for key, value in (fields or {}).items():
@@ -316,6 +316,27 @@ def diff_device(raw, to_write):
     """{record field: (old, new)} for fields that actually change."""
     return {f: (raw.get(f, ''), v) for f, v in to_write.items()
             if str(raw.get(f, '') or '') != v}
+
+
+def derived_patch(raw, to_write, fmap):
+    """{record field: text} for Absolute Address and UniverseAddress after
+    to_write, or {} when neither universe nor address changes. SetRField +
+    LDevice_Reset does not recompute them (measured 2026-10-17, VW 2026 31.3;
+    LDevice_SetParamStr/Long change nothing), so the write tools keep them in
+    step. Unpatched (universe or address empty/0) is '0' and '0/0', as
+    Spotlight stores it."""
+    spec = fmap['lighting_device']
+    fu, fa = spec['universe']['field'], spec['address']['field']
+    if fu not in to_write and fa not in to_write:
+        return {}
+    u = _as_int(to_write.get(fu, raw.get(fu)))
+    a = _as_int(to_write.get(fa, raw.get(fa)))
+    if u and a:
+        absolute, ua = str((u - 1) * 512 + a), '%d/%d' % (u, a)
+    else:
+        absolute, ua = '0', '0/0'
+    return {spec['absolute_address']['field']: absolute,
+            spec['universe_address']['field']: ua}
 
 
 def readback_mismatches(after_raw, to_write):

@@ -1,6 +1,6 @@
 # Spotlight toolset — plan
 
-Status: **phase 0 done (except multi-cell/accessories), phase 1 done and live-tested, phase 2 built — awaiting live test.** Target: Vectorworks 2026 Spotlight on
+Status: **phase 0 done (except multi-cell/accessories), phase 1 done and live-tested, phase 2 done and live-tested (single device).** Target: Vectorworks 2026 Spotlight on
 macOS via the TCP bridge (see `CLAUDE.md`).
 
 Goal: let an agent read, patch, number and check a lighting plot — lighting
@@ -53,6 +53,8 @@ Spotlight drawing (ideally a VW sample plot plus one of our own) to record:
    cells?), and whether `SetParam…` needs `LDevice_Reset` to show.
 5. Whether `SetRField` on the PIO record and `LDevice_SetParamStr` are
    equivalent, and which one keeps Spotlight's internal state consistent.
+   *Answered in the phase-2 live test:* `LDevice_SetParam*` changes nothing;
+   `SetRField` works, but the derived patch fields must be written too.
 6. Which of `LightingInv*/Univ*/SL_Export` open a modal dialog.
 
 ### Running the discovery
@@ -200,7 +202,11 @@ out (channels live on the console; selection can follow in phase 2).
 Write path: validate every change first (nothing is written if one is
 invalid) → `SetRField` on the `Lighting Device` record → `LDevice_Reset` →
 read-back of every written field (+ the derived patch fields when universe or
-address changed). Writable keys only (`spotlight_logic.WRITABLE`): no derived,
+address changed). When universe or address changes, `Absolute Address` and
+`UniverseAddress` are computed (`spotlight_logic.derived_patch`) and written
+too, because Spotlight does not recompute them (live test below); the dry run
+shows them as `patch_expected`, the write as `patch_after`, and they are part
+of the read-back. Writable keys only (`spotlight_logic.WRITABLE`): no derived,
 symbol/GDTF-owned or `'__'` fields. Every result carries `previous`; passing it
 back as `changes` restores. Whether Cmd+Z undoes bridge writes is **unknown**
 (the modal dialog may make the whole bridge session one undo step) — live test.
@@ -212,12 +218,31 @@ type (fallback: symbol name); per document, then global. Precedence in every
 read tool: table (`user`) > `Num Channels` with GDTF mode (`gdtf_mode`) >
 `Num Channels` (`record_unverified`). `suggest_footprints` always infers from
 the record values, so a table entry never hides the evidence. On the
-Franciscus data it suggests exactly 5 (Trek1 type, record 13) and 10 (FOS Par
-Aurora, record 18), confidence high.
+Franciscus data it suggests exactly 5 (Cameo TS60, 6 devices, record 13) and
+10 (FOS IQ Par, 8 devices, record 18), confidence high.
 
 Built 2026-10-17: 28 tests green, smoke-tested against a fake `vs` (diff,
 write, read-back, restore via `previous`, invalid-field refusal, footprint
-table); **not yet run in Vectorworks.**
+table).
+
+**Live test 2026-10-17** (Franciscus copy, VW 2026 31.3, macOS; device: unit
+404, FOS Par Aurora, Trek34, 2/1):
+
+| Step | Result |
+|---|---|
+| `suggest_footprints` | ✅ 5 and 10, high |
+| `set_footprint` ×2, scope document | ✅ `spotlight_info` → 14 user, 7 gdtf_mode, 15 record_unverified |
+| purpose `TEST`, user1 `claude`: dry run → write | ✅ 0 read-back mismatches, Object Info shows both; restore via `previous` ✅ |
+| address 1 → 400 | ❌ first run: record had 400 but `Absolute Address` 513 and `UniverseAddress` `2/1`, read-back still 0 mismatches (derived fields were not checked) |
+| `LDevice_SetParamStr/Long` as alternative | ❌ no effect at all (see AGENTS.md) |
+| address 1 → 400 after `derived_patch` fix | ✅ `patch_after` 912 / `2/400`; Object Info shows universe 2, address 400, absolute 912; restore via `previous` ✅ |
+
+Side findings: VW crashed once between a write and the user's check (cause
+unknown; the unsaved write was lost — the footprint table survived because it
+lives outside the drawing). The footprint table is keyed by **file name**, so
+a renamed copy does not see its entries. `LDevice_GetParam*` lags behind
+record writes until the bridge dialog closes. Cmd+Z on bridge writes: still
+untested.
 
 ### 4c. Patch (phase 3)
 

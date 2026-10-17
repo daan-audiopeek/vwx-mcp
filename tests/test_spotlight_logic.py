@@ -206,6 +206,20 @@ class WriteValidationTest(unittest.TestCase):
         self.assertEqual(sl.readback_mismatches({'Position': 'Trek7'}, {'Position': 'Trek7'}), {})
         self.assertIn('Position', sl.readback_mismatches({'Position': ''}, {'Position': 'Trek7'}))
 
+    def test_derived_patch(self):
+        raw = {'Universe': '2', 'DMX Address': '1',
+               'Absolute Address': '513', 'UniverseAddress': '2/1'}
+        dp = lambda w: sl.derived_patch(raw, w, self.fmap)  # noqa: E731
+        # live case 2026-10-17: unit 404 to 2/400
+        self.assertEqual(dp({'DMX Address': '400'}),
+                         {'Absolute Address': '912', 'UniverseAddress': '2/400'})
+        self.assertEqual(dp({'Universe': '3'}),
+                         {'Absolute Address': '1025', 'UniverseAddress': '3/1'})
+        self.assertEqual(dp({'Position': 'Trek6'}), {})
+        # unpatched as Spotlight stores it: Universe '', address 0
+        for w in ({'DMX Address': '0'}, {'DMX Address': ''}, {'Universe': ''}):
+            self.assertEqual(dp(w), {'Absolute Address': '0', 'UniverseAddress': '0/0'}, w)
+
 
 class FootprintTest(unittest.TestCase):
     def setUp(self):
