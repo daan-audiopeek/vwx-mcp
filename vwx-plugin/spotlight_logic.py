@@ -261,3 +261,181 @@ def link_positions(positions, devices):
         'devices_without_position': sum(1 for d in devices if not d.get('position')),
         'device_positions_without_object': orphans,
     }
+
+
+# ── writes (phase 2): validation and diffs, no vs ───────────────────────────
+
+# Canonical keys a write tool may set. Everything else is derived by Spotlight
+# (absolute_address, universe_address, cells, …), owned by the symbol/GDTF
+# (instrument_type, footprint, gdtf_*), or internal ('__' fields: reading them
+# through LDevice_* crashes VW, and writing them is not ours to do).
+WRITABLE = ('unit', 'channel', 'universe', 'address', 'position', 'purpose',
+            'color', 'gobo', 'gobo2', 'dimmer', 'circuit_number', 'circuit_name',
+            'focus', 'user1')
+
+
+def validate_fields(fields, fmap):
+    """{canonical key: value} -> ({record field: text to write}, [errors]).
+    None or '' clears a field. universe and address must be whole numbers
+    (universe 0..32767, address 0..512; 0 or '' unpatches). Universe and
+    address may be set on their own; the read-back shows what Spotlight made
+    of it."""
+    out, errors = {}, []
+    spec = fmap['lighting_device']
+    for key, value in (fields or {}).items():
+        if key not in spec:
+            errors.append('unknown field %r' % key)
+            continue
+        if key not in WRITABLE:
+            errors.append('field %r is not writable (derived, symbol/GDTF-owned or internal)' % key)
+            continue
+        field = spec[key]['field']
+        if field.startswith('__'):
+            errors.append('field %r maps to an internal field' % key)
+            continue
+        text = '' if value is None else str(value).strip()
+        if key in ('universe', 'address') and text != '':
+            if not text.isdigit():
+                errors.append('%s must be a whole number, got %r' % (key, value))
+                continue
+            n = int(text)
+            lo, hi = (0, 32767) if key == 'universe' else (0, 512)
+            if not lo <= n <= hi:
+                errors.append('%s %d out of range %d..%d' % (key, n, lo, hi))
+                continue
+            text = str(n)
+        out[field] = text
+    return out, errors
+
+
+def field_to_key(fmap):
+    return {s['field']: k for k, s in fmap['lighting_device'].items()}
+
+
+def diff_device(raw, to_write):
+    """{record field: (old, new)} for fields that actually change."""
+    return {f: (raw.get(f, ''), v) for f, v in to_write.items()
+            if str(raw.get(f, '') or '') != v}
+
+
+def readback_mismatches(after_raw, to_write):
+    """Fields whose read-back text differs from what was written."""
+    return {f: {'wrote': v, 'reads': after_raw.get(f, '')}
+            for f, v in to_write.items() if str(after_raw.get(f, '') or '') != v}
+
+
+# ── footprints (phase 2): table + inference from patch spacing ──────────────
+
+FOOTPRINT_TABLE = os.path.join(_DIR, 'spotlight_footprints.json')
+
+
+def footprint_key(row):
+    """Footprints are per instrument type; fall back to the symbol name."""
+    return str(row.get('instrument_type') or row.get('symbol') or '').strip()
+
+
+def load_footprints(path=None):
+    """{'documents': {doc: {type: entry}}, 'global': {type: entry}}. Missing
+    or unreadable file -> empty table (a bad table must not break reads)."""
+    try:
+        with open(path or FOOTPRINT_TABLE, encoding='utf-8') as f:
+            t = json.load(f)
+    except Exception:
+        t = {}
+    t.setdefault('documents', {})
+    t.setdefault('global', {})
+    return t
+
+
+def save_footprints(table, path=None):
+    p = path or FOOTPRINT_TABLE
+    tmp = p + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(table, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, p)
+
+
+def footprint_lookup(table, document, key):
+    """Entry for one instrument type: this document first, then global."""
+    if not key or not table:
+        return None
+    return (table.get('documents', {}).get(document or '', {}).get(key)
+            or table.get('global', {}).get(key))
+
+
+def set_footprint(table, document, key, channels, scope='document', note=None, when=None):
+    """Confirm (channels int) or remove (channels None) one entry. Returns table."""
+    if scope not in ('document', 'global'):
+        raise ValueError("scope must be 'document' or 'global'")
+    if not key:
+        raise ValueError('instrument_type required')
+    bucket = (table['documents'].setdefault(document or '', {}) if scope == 'document'
+              else table['global'])
+    if channels is None:
+        bucket.pop(key, None)
+    else:
+        n = int(channels)
+        if not 1 <= n <= 512:
+            raise ValueError('channels must be 1..512')
+        bucket[key] = {'channels': n, 'source': 'user', 'note': note, 'confirmed': when}
+    return table
+
+
+def apply_footprints(rows, table, document):
+    """Recompute footprint, footprint_source and address_end with the table.
+    Order: user table > Num Channels with a GDTF mode > Num Channels unverified."""
+    for r in rows:
+        e = footprint_lookup(table, document, footprint_key(r))
+        if e:
+            r['footprint'] = e['channels']
+            r['footprint_source'] = 'user'
+        if r.get('patched') and r.get('footprint'):
+            r['address_end'] = r['address'] + int(r['footprint']) - 1
+    return rows
+
+
+def infer_footprints(rows):
+    """Per instrument type: the address gaps to the next device of the SAME
+    type in the same universe (consecutive in the patch). A run of equal gaps
+    smaller than the record footprint is the evidence that the real mode is
+    smaller. Never a fact — a suggestion the user confirms with set_footprint."""
+    by_u = {}
+    for r in rows:
+        if r.get('patched'):
+            by_u.setdefault(r['universe_number'], []).append(r)
+    gaps, recs, counts = {}, {}, {}
+    for us in by_u.values():
+        us.sort(key=lambda r: r['address'])
+        for a, b in zip(us, us[1:]):
+            ka, kb = footprint_key(a), footprint_key(b)
+            if ka and ka == kb:
+                gaps.setdefault(ka, []).append(b['address'] - a['address'])
+    for r in rows:
+        k = footprint_key(r)
+        if not k:
+            continue
+        counts[k] = counts.get(k, 0) + 1
+        if r.get('footprint'):
+            recs.setdefault(k, set()).add(int(r['footprint']))
+    out = []
+    for k in sorted(counts, key=natural_key):
+        g = gaps.get(k, [])
+        rec = sorted(recs.get(k, set()))
+        entry = {'instrument_type': k, 'devices': counts[k], 'record_footprints': rec,
+                 'gaps': sorted(set(g)), 'suggested': None, 'confidence': None,
+                 'reason': None}
+        if not g:
+            entry['reason'] = 'no consecutive devices of this type in the patch'
+        else:
+            smallest = min(g)
+            if rec and smallest >= max(rec):
+                entry['reason'] = 'record footprint fits the patch spacing'
+            else:
+                entry['suggested'] = smallest
+                same = g.count(smallest)
+                entry['confidence'] = 'high' if same >= 3 and len(set(g)) == 1 else (
+                    'medium' if same >= 2 else 'low')
+                entry['reason'] = ('%d gap(s) of %d addresses, record says %s'
+                                   % (same, smallest, '/'.join(map(str, rec)) or '?'))
+        out.append(entry)
+    return out

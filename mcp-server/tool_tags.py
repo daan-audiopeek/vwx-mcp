@@ -152,6 +152,11 @@ TOOL_TAGS = {
     "list_lighting_devices": "spotlight",
     "get_lighting_device": "spotlight",
     "list_hanging_positions": "spotlight",
+    "set_lighting_device_fields": "spotlight",
+    "bulk_set_lighting_fields": "spotlight",
+    "reset_lighting_devices": "spotlight",
+    "suggest_footprints": "spotlight",
+    "set_footprint": "spotlight",
     # site
     "get_site_model_info": "site",
     "update_site_model": "site",

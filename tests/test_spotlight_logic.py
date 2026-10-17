@@ -172,5 +172,82 @@ class PositionLinkTest(unittest.TestCase):
         self.assertNotIn(name, links['device_positions_without_object'])
 
 
+class WriteValidationTest(unittest.TestCase):
+    def setUp(self):
+        self.fmap = sl.load_field_map()
+
+    def test_valid_fields_map_to_record_names(self):
+        out, err = sl.validate_fields({'unit': 7, 'universe': '2', 'address': 17,
+                                       'position': 'Trek6', 'purpose': None}, self.fmap)
+        self.assertEqual(err, [])
+        self.assertEqual(out, {'Unit Number': '7', 'Universe': '2', 'DMX Address': '17',
+                               'Position': 'Trek6', 'Purpose': ''})
+
+    def test_rejects_derived_internal_unknown(self):
+        for key in ('absolute_address', 'universe_address', 'footprint', 'cells',
+                    'accessories', 'instrument_type', 'uid', 'nope'):
+            out, err = sl.validate_fields({key: 1}, self.fmap)
+            self.assertTrue(err, key)
+
+    def test_rejects_bad_patch_numbers(self):
+        for f in ({'address': 513}, {'address': -1}, {'address': '1a'}, {'universe': 'A'}):
+            self.assertTrue(sl.validate_fields(f, self.fmap)[1], f)
+        self.assertEqual(sl.validate_fields({'address': ' 05 '}, self.fmap)[0],
+                         {'DMX Address': '5'})
+
+    def test_writable_never_internal(self):
+        for k in sl.WRITABLE:
+            self.assertFalse(self.fmap['lighting_device'][k]['field'].startswith('__'), k)
+
+    def test_diff_and_readback(self):
+        raw = {'Unit Number': '1', 'Position': 'Trek6'}
+        d = sl.diff_device(raw, {'Unit Number': '1', 'Position': 'Trek7'})
+        self.assertEqual(d, {'Position': ('Trek6', 'Trek7')})
+        self.assertEqual(sl.readback_mismatches({'Position': 'Trek7'}, {'Position': 'Trek7'}), {})
+        self.assertIn('Position', sl.readback_mismatches({'Position': ''}, {'Position': 'Trek7'}))
+
+
+class FootprintTest(unittest.TestCase):
+    def setUp(self):
+        self.fmap, self.dump, self.rows = _rows()
+
+    def test_inference_matches_live_finding(self):
+        # Franciscus: 13-ch type every 5 addresses, 18-ch type every 10.
+        sug = {tuple(e['record_footprints']): e for e in sl.infer_footprints(self.rows)}
+        self.assertEqual(sug[(13,)]['suggested'], 5)
+        self.assertEqual(sug[(18,)]['suggested'], 10)
+        self.assertEqual(sug[(18,)]['confidence'], 'high')
+        self.assertIsNone(sug[(90,)]['suggested'])      # GDTF devices fit
+        self.assertIsNone(sug[(17,)]['suggested'])
+
+    def test_table_roundtrip_and_precedence(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), 'fp.json')
+        t = sl.load_footprints(path)                     # missing file -> empty
+        key = next(sl.footprint_key(r) for r in self.rows if r['footprint'] == 18)
+        sl.set_footprint(t, 'Doc.vwx', key, 10, note='spacing')
+        sl.save_footprints(t, path)
+        t = sl.load_footprints(path)
+        self.assertEqual(sl.footprint_lookup(t, 'Doc.vwx', key)['channels'], 10)
+        self.assertIsNone(sl.footprint_lookup(t, 'Other.vwx', key))
+        sl.set_footprint(t, None, key, 12, scope='global')
+        self.assertEqual(sl.footprint_lookup(t, 'Other.vwx', key)['channels'], 12)
+        self.assertEqual(sl.footprint_lookup(t, 'Doc.vwx', key)['channels'], 10)  # doc wins
+        rows = sl.apply_footprints(self.rows, t, 'Doc.vwx')
+        hit = [r for r in rows if sl.footprint_key(r) == key]
+        self.assertTrue(all(r['footprint'] == 10 and r['footprint_source'] == 'user' for r in hit))
+        self.assertTrue(all(r['address_end'] == r['address'] + 9 for r in hit if r['patched']))
+        sl.set_footprint(t, 'Doc.vwx', key, None)        # remove
+        self.assertEqual(sl.footprint_lookup(t, 'Doc.vwx', key)['channels'], 12)
+
+    def test_set_footprint_rejects(self):
+        t = sl.load_footprints('/nonexistent/x.json')
+        for args in ((t, 'D', 'X', 0), (t, 'D', 'X', 513), (t, 'D', '', 5)):
+            with self.assertRaises(ValueError):
+                sl.set_footprint(*args)
+        with self.assertRaises(ValueError):
+            sl.set_footprint(t, 'D', 'X', 5, scope='world')
+
+
 if __name__ == '__main__':
     unittest.main()

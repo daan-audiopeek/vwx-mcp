@@ -1,6 +1,6 @@
 # Spotlight toolset — plan
 
-Status: **phase 0 done (except multi-cell/accessories), phase 1 done and live-tested.** Target: Vectorworks 2026 Spotlight on
+Status: **phase 0 done (except multi-cell/accessories), phase 1 done and live-tested, phase 2 built — awaiting live test.** Target: Vectorworks 2026 Spotlight on
 macOS via the TCP bridge (see `CLAUDE.md`).
 
 Goal: let an agent read, patch, number and check a lighting plot — lighting
@@ -190,14 +190,34 @@ out (channels live on the console; selection can follow in phase 2).
 
 | Tool | Does |
 |---|---|
-| `set_lighting_device_fields` | set mapped fields on one or many UUIDs (`dry_run`) |
-| `bulk_set_lighting_fields` | criteria/filter → fields (e.g. color `L201` on all units of `FOH 1`) |
-| `add_lighting_accessory` / `remove_lighting_accessory` | via `LDevice_AddAccessory`/`DeleteAcc` |
-| `reset_lighting_devices` | `LDevice_Reset` on scope (after manual record edits) |
+| `set_lighting_device_fields` | writable keys on given devices — `changes` [{object_id, fields}] or `object_ids` + `fields`; `dry_run` default |
+| `bulk_set_lighting_fields` | same fields on every device matching the list filters; no filter needs `all_devices` |
+| `reset_lighting_devices` | `LDevice_Reset` (fallback `ResetObject`) on ids / filter / all |
+| `suggest_footprints` | per instrument type: record footprint, address gaps in the patch, suggested footprint + confidence, table entry |
+| `set_footprint` | confirm (or remove) the real footprint of a type; scope `document` (default) or `global` |
+| ~~accessories~~ | postponed until a drawing with accessories has been probed |
 
-Device placement (`create_lighting_device` from a symbol on a position) comes
-later and only if phase 0 shows it can be done without the UI — it is the
-same "insert PIO by script" problem that bit plant styles (AGENTS.md).
+Write path: validate every change first (nothing is written if one is
+invalid) → `SetRField` on the `Lighting Device` record → `LDevice_Reset` →
+read-back of every written field (+ the derived patch fields when universe or
+address changed). Writable keys only (`spotlight_logic.WRITABLE`): no derived,
+symbol/GDTF-owned or `'__'` fields. Every result carries `previous`; passing it
+back as `changes` restores. Whether Cmd+Z undoes bridge writes is **unknown**
+(the modal dialog may make the whole bridge session one undo step) — live test.
+No overlap check on write yet: that is `check_patch` in phase 3.
+
+Footprint table: `spotlight_footprints.json` next to `commands.py` (local to
+the Mac, not in the repo, not overwritten by the installer). Key = instrument
+type (fallback: symbol name); per document, then global. Precedence in every
+read tool: table (`user`) > `Num Channels` with GDTF mode (`gdtf_mode`) >
+`Num Channels` (`record_unverified`). `suggest_footprints` always infers from
+the record values, so a table entry never hides the evidence. On the
+Franciscus data it suggests exactly 5 (Trek1 type, record 13) and 10 (FOS Par
+Aurora, record 18), confidence high.
+
+Built 2026-10-17: 28 tests green, smoke-tested against a fake `vs` (diff,
+write, read-back, restore via `previous`, invalid-field refusal, footprint
+table); **not yet run in Vectorworks.**
 
 ### 4c. Patch (phase 3)
 

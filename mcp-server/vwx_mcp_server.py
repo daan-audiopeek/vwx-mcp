@@ -556,6 +556,7 @@ _RO_NAMES = frozenset({
     "get_document_info", "get_document_preferences", "get_georeferencing",
     "vs_signature", "vs_index_stats", "list_commands", "criteria_count",
     "eval_expression", "three_point_center", "spotlight_info",
+    "suggest_footprints",
 })
 _RO_PREFIXES = ("get_", "list_", "count_", "find_")
 
@@ -2991,6 +2992,88 @@ def list_hanging_positions(ctx: Context, layers: Optional[List[str]] = None) -> 
     p = {}
     if layers: p["layers"] = layers
     return cmd("list_hanging_positions", p)
+
+
+@vtool
+def set_lighting_device_fields(ctx: Context, changes: Optional[List[Dict[str, Any]]] = None,
+                               object_ids: Optional[List[str]] = None,
+                               fields: Optional[Dict[str, Any]] = None,
+                               dry_run: bool = True) -> str:
+    """Set fields on lighting devices. Writable keys: unit, channel, universe,
+    address, position, purpose, color, gobo, gobo2, dimmer, circuit_number,
+    circuit_name, focus, user1 (None/'' clears). Either changes =
+    [{object_id, fields}] (different values per device) or object_ids + fields
+    (same values). dry_run=True (default) only returns the diff — show it to
+    the user, then call again with dry_run=false. Each result has `previous`:
+    pass those back as changes to restore. Nothing is written if any change is
+    invalid; writes are read back and mismatches reported."""
+    p = {"dry_run": dry_run}
+    if changes is not None: p["changes"] = changes
+    if object_ids is not None: p["object_ids"] = object_ids
+    if fields is not None: p["fields"] = fields
+    return cmd("set_lighting_device_fields", p)
+
+@vtool
+def bulk_set_lighting_fields(ctx: Context, fields: Dict[str, Any],
+                             position: Optional[str] = None, layer: Optional[str] = None,
+                             class_name: Optional[str] = None,
+                             instrument_type: Optional[str] = None,
+                             device_type: Optional[str] = None,
+                             purpose: Optional[str] = None, color: Optional[str] = None,
+                             universe: Optional[int] = None, patched: Optional[bool] = None,
+                             search: Optional[str] = None,
+                             layers: Optional[List[str]] = None,
+                             all_devices: bool = False, dry_run: bool = True) -> str:
+    """Set the same fields on every device matching the filters (same filters
+    as list_lighting_devices), e.g. color on all units of one position.
+    Without any filter, all_devices=true is required. dry_run=True (default)
+    returns the diff only."""
+    p = {"fields": fields, "dry_run": dry_run}
+    for k, v in (("position", position), ("layer", layer), ("class_name", class_name),
+                 ("instrument_type", instrument_type), ("device_type", device_type),
+                 ("purpose", purpose), ("color", color), ("universe", universe),
+                 ("patched", patched), ("search", search), ("layers", layers)):
+        if v is not None: p[k] = v
+    if all_devices: p["all_devices"] = True
+    return cmd("bulk_set_lighting_fields", p)
+
+@vtool
+def reset_lighting_devices(ctx: Context, object_ids: Optional[List[str]] = None,
+                           position: Optional[str] = None, layer: Optional[str] = None,
+                           universe: Optional[int] = None,
+                           layers: Optional[List[str]] = None,
+                           all_devices: bool = False) -> str:
+    """Regenerate lighting devices (LDevice_Reset) — after record edits made
+    outside these tools. Pass object_ids, a filter, or all_devices=true."""
+    p = {}
+    for k, v in (("object_ids", object_ids), ("position", position), ("layer", layer),
+                 ("universe", universe), ("layers", layers)):
+        if v is not None: p[k] = v
+    if all_devices: p["all_devices"] = True
+    return cmd("reset_lighting_devices", p)
+
+@vtool
+def suggest_footprints(ctx: Context, layers: Optional[List[str]] = None) -> str:
+    """Per instrument type: the footprint the record claims (Num Channels), the
+    address gaps between consecutive devices of that type in the patch, a
+    suggested real footprint when the gaps are smaller, its confidence, and
+    the current footprint-table entry. Only a suggestion: confirm with
+    set_footprint after the user agrees."""
+    p = {}
+    if layers: p["layers"] = layers
+    return cmd("suggest_footprints", p)
+
+@vtool
+def set_footprint(ctx: Context, instrument_type: str, channels: Optional[int] = None,
+                  scope: str = "document", note: Optional[str] = None) -> str:
+    """Confirm the real DMX footprint of an instrument type (channels), or
+    remove the entry (channels omitted). scope 'document' (default, this
+    drawing) or 'global' (all drawings). Table entries win over Num Channels
+    in every Spotlight read/patch tool (footprint_source 'user')."""
+    p = {"instrument_type": instrument_type, "scope": scope}
+    if channels is not None: p["channels"] = channels
+    if note: p["note"] = note
+    return cmd("set_footprint", p)
 
 
 # ═══════════════════════════════════════════════════════════════════

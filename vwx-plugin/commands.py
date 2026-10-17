@@ -7042,7 +7042,7 @@ def _sl_place(h, ln):
     }
 
 
-def _sl_devices(p, sl, fmap):
+def _sl_devices(p, sl, fmap, record_footprints=False):
     """Typed device rows for the scope in p. Schematic views are the same
     device drawn twice, so they are skipped unless include_schematic."""
     rec = fmap['records']['lighting_device']
@@ -7055,7 +7055,9 @@ def _sl_devices(p, sl, fmap):
         extra = _sl_place(h, ln)
         extra['schematic_view'] = schem
         rows.append(sl.device_row(_sl_raw(h, rec, fields), fmap, extra))
-    return rows
+    if record_footprints:
+        return rows
+    return sl.apply_footprints(rows, sl.load_footprints(), _sl_doc())
 
 
 def _sl_multi_cell_note(rows):
@@ -7096,14 +7098,9 @@ def list_lighting_devices(p):
     offset, layers, include_schematic."""
     sl = _slx()
     fmap = sl.load_field_map()
-    flt = {k: p.get(k) for k in ('position', 'layer', 'instrument_type', 'device_type',
-                                 'purpose', 'color', 'universe', 'patched', 'search')
-           if p.get(k) is not None}
-    if p.get('class_name') is not None:
-        flt['class'] = p.get('class_name')
+    _, rows = _sl_filtered(p, sl, fmap)
     try:
-        rows = sl.sort_rows([r for r in _sl_devices(p, sl, fmap) if sl.matches(r, flt)],
-                            p.get('sort') or 'position')
+        rows = sl.sort_rows(rows, p.get('sort') or 'position')
     except ValueError as e:
         return {'error': str(e)}
     offset = int(p.get('offset') or 0)
@@ -7142,7 +7139,7 @@ def get_lighting_device(p):
     ln = _safe(lambda: vs.GetLName(vs.GetLayer(h)), '')
     extra = _sl_place(h, ln)
     extra['schematic_view'] = bool(_safe(lambda: vs.IsLDSchematicViewObj(h), False))
-    row = sl.device_row(raw, fmap, extra)
+    row = sl.apply_footprints([sl.device_row(raw, fmap, extra)], sl.load_footprints(), _sl_doc())[0]
     cells = _safe(lambda: vs.LDevice_GetCellCount(h)) or 1
     records = [_safe(lambda i=i: vs.GetName(vs.GetRecord(h, i)), '')
                for i in range(1, _safe(lambda: vs.NumRecords(h), 0) + 1)]
@@ -7169,3 +7166,196 @@ def list_hanging_positions(p):
     out = {'status': 'ok', 'count': len(positions), 'positions': positions}
     out.update(links)
     return out
+
+
+# ── Spotlight write tools + footprint table (phase 2) ────────────────────────
+# Writes go through SetRField on the 'Lighting Device' record, then
+# LDevice_Reset, then a read-back of every written field. dry_run defaults to
+# True everywhere: the agent shows the diff, the user says go. Every result
+# carries `previous` (canonical keys), so passing it back as `changes`
+# restores the old values — whether Cmd+Z covers bridge writes is unverified.
+
+_SL_MAX_WRITE = 500
+
+
+def _sl_doc():
+    return _safe(vs.GetFName, '') or ''
+
+
+def _sl_reset(h):
+    """LDevice_Reset is Spotlight's own; ResetObject is the generic fallback."""
+    try:
+        vs.LDevice_Reset(h)
+        return 'LDevice_Reset'
+    except Exception:
+        _safe(lambda: vs.ResetObject(h))
+        return 'ResetObject'
+
+
+def _sl_write(changes, dry_run, sl, fmap, label):
+    """changes = [(object_id, {canonical key: value})]. Validates everything
+    first, collects handles, then mutates — nothing is written if any change
+    is invalid."""
+    rec = fmap['records']['lighting_device']
+    pio = fmap['pio']['lighting_device']
+    f2k = sl.field_to_key(fmap)
+    derived = [fmap['lighting_device'][k]['field'] for k in
+               ('absolute_address', 'universe_address', 'universe', 'address')]
+    plan, errors = [], []
+    for oid, fields in changes:
+        to_write, errs = sl.validate_fields(fields, fmap)
+        h = _h(oid)
+        if h is None:
+            errs.append('object not found')
+        elif _pio_name(h) != pio:
+            errs.append('not a %s' % pio)
+        if errs:
+            errors.append({'object_id': oid, 'errors': errs})
+            continue
+        before = _sl_raw(h, rec, list(to_write))
+        plan.append((oid, h, to_write, sl.diff_device(before, to_write)))
+    if errors:
+        return {'error': 'nothing written: invalid changes', 'invalid': errors}
+    if len(plan) > _SL_MAX_WRITE:
+        return {'error': 'nothing written: %d devices, limit %d per call' % (len(plan), _SL_MAX_WRITE)}
+
+    results, mismatched = [], 0
+    if not dry_run and any(d for _, _, _, d in plan):
+        _safe(lambda: vs.NameUndoEvent(label))
+    for oid, h, to_write, diff in plan:
+        r = {'object_id': oid,
+             'unit': _safe(lambda: vs.GetRField(h, rec, fmap['lighting_device']['unit']['field']), ''),
+             'position': _safe(lambda: vs.GetRField(h, rec, fmap['lighting_device']['position']['field']), ''),
+             'changes': {f2k.get(f, f): {'old': o, 'new': n} for f, (o, n) in diff.items()},
+             'previous': {f2k.get(f, f): o for f, (o, n) in diff.items()}}
+        if diff and not dry_run:
+            for f, (_, n) in diff.items():
+                vs.SetRField(h, rec, f, n)
+            r['reset'] = _sl_reset(h)
+            after = _sl_raw(h, rec, list(to_write) + derived)
+            bad = sl.readback_mismatches(after, {f: n for f, (_, n) in diff.items()})
+            if bad:
+                r['readback_mismatch'] = {f2k.get(f, f): v for f, v in bad.items()}
+                mismatched += 1
+            if any(f in diff for f in derived):
+                r['patch_after'] = {f2k.get(f, f): after.get(f) for f in derived}
+        results.append(r)
+    changed = sum(1 for _, _, _, d in plan if d)
+    return {'status': 'ok', 'dry_run': bool(dry_run), 'devices': len(plan),
+            'devices_changed' if not dry_run else 'devices_to_change': changed,
+            'readback_mismatches': mismatched, 'results': results,
+            'next': ('call again with dry_run=false to write' if dry_run and changed
+                     else 'to undo: pass each result\'s previous back as changes'
+                     if changed else 'nothing to change')}
+
+
+def set_lighting_device_fields(p):
+    """Set writable fields on lighting devices (unit, channel, universe,
+    address, position, purpose, color, gobo, gobo2, dimmer, circuit_number,
+    circuit_name, focus, user1). params: changes ([{object_id, fields}]) or
+    object_ids + fields; dry_run (default True). Returns per device the diff,
+    `previous` for restoring, and on write the read-back result."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    if p.get('changes'):
+        changes = [(c.get('object_id'), c.get('fields') or {}) for c in p['changes']]
+    else:
+        changes = [(oid, p.get('fields') or {}) for oid in (p.get('object_ids') or [])]
+    if not changes:
+        return {'error': 'pass changes, or object_ids + fields'}
+    return _sl_write(changes, p.get('dry_run', True) is not False, sl, fmap,
+                     'vwx-mcp: Spotlight fields')
+
+
+def _sl_filtered(p, sl, fmap):
+    # Keys spelled out (not looped) so tools/pruefe_konsistenz.py can see them.
+    flt = {'position': p.get('position'), 'layer': p.get('layer'),
+           'class': p.get('class_name'), 'instrument_type': p.get('instrument_type'),
+           'device_type': p.get('device_type'), 'purpose': p.get('purpose'),
+           'color': p.get('color'), 'universe': p.get('universe'),
+           'patched': p.get('patched'), 'search': p.get('search')}
+    flt = {k: v for k, v in flt.items() if v is not None}
+    rows = [r for r in _sl_devices(p, sl, fmap) if sl.matches(r, flt)]
+    return flt, rows
+
+
+def bulk_set_lighting_fields(p):
+    """Set the same fields on every device matching the filters of
+    list_lighting_devices (position, layer, class_name, instrument_type,
+    device_type, purpose, color, universe, patched, search, layers).
+    params: fields, filters, dry_run (default True), all_devices (required
+    when no filter is given)."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    flt, rows = _sl_filtered(p, sl, fmap)
+    if not flt and not p.get('all_devices'):
+        return {'error': 'no filter given: pass a filter, or all_devices=true'}
+    if not rows:
+        return {'error': 'no devices match', 'filters': flt}
+    fields = p.get('fields') or {}
+    out = _sl_write([(r['object_id'], fields) for r in rows], p.get('dry_run', True) is not False,
+                    sl, fmap, 'vwx-mcp: Spotlight bulk fields')
+    out['filters'] = flt
+    return out
+
+
+def reset_lighting_devices(p):
+    """Regenerate lighting devices (LDevice_Reset), e.g. after record edits
+    made elsewhere. params: object_ids, or the filters of
+    list_lighting_devices (all_devices=true for every device)."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    if p.get('object_ids'):
+        hs = [(oid, _h(oid)) for oid in p['object_ids']]
+    else:
+        flt, rows = _sl_filtered(p, sl, fmap)
+        if not flt and not p.get('all_devices'):
+            return {'error': 'pass object_ids or a filter, or all_devices=true'}
+        hs = [(r['object_id'], _h(r['object_id'])) for r in rows]
+    missing = [oid for oid, h in hs if h is None]
+    how = {}
+    for oid, h in hs:
+        if h is not None:
+            m = _sl_reset(h)
+            how[m] = how.get(m, 0) + 1
+    return {'status': 'ok', 'reset': sum(how.values()), 'method': how, 'not_found': missing}
+
+
+def suggest_footprints(p):
+    """Per instrument type: record footprints (Num Channels), the address gaps
+    to the next device of the same type in the patch, a suggested footprint
+    when the gaps are smaller than the record says, and what the footprint
+    table already holds. Suggestions are never applied by themselves —
+    confirm with set_footprint. params: layers."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    doc = _sl_doc()
+    table = sl.load_footprints()
+    # infer from the RECORD footprints: a table entry must not hide the evidence
+    rows = _sl_devices(p, sl, fmap, record_footprints=True)
+    out = sl.infer_footprints(rows)
+    for e in out:
+        e['table'] = sl.footprint_lookup(table, doc, e['instrument_type'])
+    return {'status': 'ok', 'document': doc, 'types': out,
+            'suggestions': sum(1 for e in out if e['suggested'] and not e['table'])}
+
+
+def set_footprint(p):
+    """Confirm the real footprint (DMX channels) of an instrument type, or
+    remove it (channels null). The table wins over Num Channels for every
+    read and patch tool. params: instrument_type, channels, scope
+    ('document' default — this drawing only — or 'global'), note."""
+    import time
+    sl = _slx()
+    doc = _sl_doc()
+    table = sl.load_footprints()
+    try:
+        sl.set_footprint(table, doc, p.get('instrument_type'), p.get('channels'),
+                         p.get('scope') or 'document', p.get('note'),
+                         time.strftime('%Y-%m-%d %H:%M'))
+        sl.save_footprints(table)
+    except (ValueError, OSError) as e:
+        return {'error': str(e)}
+    return {'status': 'ok', 'document': doc, 'instrument_type': p.get('instrument_type'),
+            'entry': sl.footprint_lookup(table, doc, p.get('instrument_type')),
+            'scope': p.get('scope') or 'document'}
