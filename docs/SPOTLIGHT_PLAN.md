@@ -97,7 +97,14 @@ universal names fail silently, they do not pop a dialog). Field map:
   start every 10 addresses (185, 195, …, 255) and six 13-ch devices every 5
   (351, 356, …, 376) → overlapping ranges per `Num Channels`. Either those
   fixtures run a smaller mode than the record says (`Fixture Mode` is empty
-  on all devices), or the patch overlaps. To be confirmed with the user.
+  on all devices), or the patch overlaps. **User: the real patch is correct**
+  → `Num Channels` does not follow the mode actually used. Consequence for
+  `check_patch`: footprint source per device = user footprint table
+  (instrument type/mode → channels) > GDTF mode (if set) > `Num Channels`;
+  an overlap that only exists via `Num Channels` is a *warning* ("footprint
+  unverified"), not an error. `get_patch` reports the footprint source.
+- **Channels are done on the console, not in VW** → `Channel` empty is not a
+  QC finding; channel tools (4d) drop to optional/last, unit numbering stays.
 - 2 devices are unpatched (`0/0`), no unit number, no position.
 - Script bug found and fixed: the first run took the IFC record as "the device
   record", so `device_field_stats` and the field-name probe are wrong in this
