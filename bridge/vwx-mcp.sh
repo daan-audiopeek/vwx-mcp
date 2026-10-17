@@ -17,7 +17,7 @@ export DESKTOP_HOST="${DESKTOP_HOST:-127.0.0.1}"
 export VWX_MCP_PORT="${VWX_MCP_PORT:-9878}"
 export VWX_TRANSPORT="${VWX_TRANSPORT:-tcp}"
 export MCP_TRANSPORT="${MCP_TRANSPORT:-stdio}"
-# full | gis | modeling | baumkataster | minimal
+# full | gis | modeling | baumkataster | spotlight | minimal
 export VWX_TOOLSET="${VWX_TOOLSET:-full}"
 
 if [ ! -x "$VENV/bin/python" ]; then

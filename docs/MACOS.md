@@ -89,5 +89,5 @@ restarting the bridge. Restart Claude Desktop after server changes.
 - **Bridge log**: `~/Library/Application Support/Vectorworks/2026/Plug-ins/VWX-MCP/bridge.log`
 - **Server log**: Claude Desktop > Settings > Developer > vwx-mcp, or
   `~/Library/Logs/Claude/mcp-server-vwx-mcp.log`
-- **Too many tools for the client**: set `VWX_TOOLSET=minimal` (or `modeling`,
+- **Too many tools for the client**: set `VWX_TOOLSET=minimal` (or `spotlight`, `modeling`,
   `gis`) in `~/.local/share/vwx-mcp/vwx-mcp.sh`.

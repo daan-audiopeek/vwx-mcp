@@ -147,6 +147,11 @@ TOOL_TAGS = {
     "get_plant_database": "landscape",
     "batch_update_plants": "landscape",
     "baumkataster_set_fields": "landscape",
+    # spotlight (lighting devices, positions)
+    "spotlight_info": "spotlight",
+    "list_lighting_devices": "spotlight",
+    "get_lighting_device": "spotlight",
+    "list_hanging_positions": "spotlight",
     # site
     "get_site_model_info": "site",
     "update_site_model": "site",
@@ -341,6 +346,8 @@ PRESETS = {
                  "appearance", "query", "document", "view", "escape"},
     "baumkataster": {"landscape", "records", "query", "layers", "document",
                      "io", "escape"},
+    "spotlight": {"spotlight", "records", "query", "layers", "classes",
+                  "worksheets", "document", "escape"},
     "minimal": {"document", "query", "escape"},
 }
 

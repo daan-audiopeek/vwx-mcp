@@ -51,6 +51,8 @@ Spotlight verbs, and keep it updated as phases land.
 | `vwx-plugin/vs_index.json` | signature index of all 3071 `vs.*` functions (71 in category `Spotlight`) |
 | `mcp-server/vwx_mcp_server.py` | fastmcp 3.x server; tools are `@vtool` wrappers calling `cmd("verb", {...})` |
 | `mcp-server/tool_tags.py` | tool → tag map + `VWX_TOOLSET` presets |
+| `vwx-plugin/spotlight_logic.py`, `spotlight_fields.json` | Spotlight: pure logic (no `vs`) + verified field map; verbs in `commands.py` |
+| `tests/` | plain-Python tests for the pure logic: `python3 -m unittest discover -s tests` |
 | `tools/pruefe_konsistenz.py` | AST consistency check: server ↔ commands ↔ tags (exit 1 on findings) |
 | `tools/build_vs_index.py` | rebuild the index from the SDK `vs.py` stub |
 

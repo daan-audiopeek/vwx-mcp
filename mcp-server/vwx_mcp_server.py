@@ -555,7 +555,7 @@ _RO_NAMES = frozenset({
     "ping", "distance", "distance_3d", "polygon_centroid",
     "get_document_info", "get_document_preferences", "get_georeferencing",
     "vs_signature", "vs_index_stats", "list_commands", "criteria_count",
-    "eval_expression", "three_point_center",
+    "eval_expression", "three_point_center", "spotlight_info",
 })
 _RO_PREFIXES = ("get_", "list_", "count_", "find_")
 
@@ -603,6 +603,9 @@ _MAX_RESULT_CHARS = {
     "get_textures": 120_000,
     "get_record_formats": 120_000,
     "for_each_criteria": 250_000,
+    "list_lighting_devices": 250_000,
+    "get_lighting_device": 120_000,
+    "list_hanging_positions": 150_000,
 }
 
 READONLY_TOOLS = set()      # filled by vtool() as tools register
@@ -2924,6 +2927,70 @@ def export_document(fmt: str = "pdf") -> str:
         "export as a hang, and do not start a second one.\n"
         "Confirm the written path back to the user once it returns."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Spotlight (lighting devices, positions) — read tools, phase 1
+# Field names: vwx-plugin/spotlight_fields.json; plan: docs/SPOTLIGHT_PLAN.md
+# ═══════════════════════════════════════════════════════════════════
+
+@vtool
+def spotlight_info(ctx: Context, layers: Optional[List[str]] = None) -> str:
+    """Spotlight overview: counts of lighting devices, hanging positions (Light
+    Position Obj), truss and video screens, plus a device summary — universes in
+    use, patched/unpatched, devices per position and instrument type, and where
+    each footprint comes from (gdtf_mode = trustworthy, record_unverified = the
+    'Num Channels' field without a GDTF mode, may be stale). Start here."""
+    p = {}
+    if layers: p["layers"] = layers
+    return cmd("spotlight_info", p)
+
+@vtool
+def list_lighting_devices(ctx: Context, position: Optional[str] = None,
+                          layer: Optional[str] = None, class_name: Optional[str] = None,
+                          instrument_type: Optional[str] = None,
+                          device_type: Optional[str] = None,
+                          purpose: Optional[str] = None, color: Optional[str] = None,
+                          universe: Optional[int] = None, patched: Optional[bool] = None,
+                          search: Optional[str] = None,
+                          fields: Optional[List[str]] = None, sort: str = "position",
+                          limit: int = 500, offset: int = 0,
+                          layers: Optional[List[str]] = None,
+                          include_schematic: bool = False) -> str:
+    """Lighting devices as typed rows: unit, channel, universe, address,
+    address_end, footprint (+ footprint_source), position, purpose,
+    instrument_type, color, gobo, dimmer, uid, x/y/z, layer, class, object_id …
+    Text filters are exact and case-insensitive ('' matches empty, e.g.
+    position='' = devices without a position); search is a substring over all
+    text. sort: position (then unit) | address | layer | instrument_type.
+    fields limits the keys returned (object_id always kept). Schematic views
+    are skipped unless include_schematic."""
+    p = {"sort": sort, "limit": limit, "offset": offset}
+    for k, v in (("position", position), ("layer", layer), ("class_name", class_name),
+                 ("instrument_type", instrument_type), ("device_type", device_type),
+                 ("purpose", purpose), ("color", color), ("universe", universe),
+                 ("patched", patched), ("search", search), ("fields", fields),
+                 ("layers", layers)):
+        if v is not None: p[k] = v
+    if include_schematic: p["include_schematic"] = True
+    return cmd("list_lighting_devices", p)
+
+@vtool
+def get_lighting_device(ctx: Context, object_id: str) -> str:
+    """One lighting device in full: the typed row of list_lighting_devices,
+    every field of its 'Lighting Device' record as raw text, the names of all
+    attached records, and cell/accessory counts."""
+    return cmd("get_lighting_device", {"object_id": object_id})
+
+@vtool
+def list_hanging_positions(ctx: Context, layers: Optional[List[str]] = None) -> str:
+    """Hanging positions (Light Position Obj): name, numbering settings, layer,
+    x/y/z, and the devices linked by name (device_count, unit numbers). Also
+    returns device Position names that match no position object, and how many
+    devices have no position at all."""
+    p = {}
+    if layers: p["layers"] = layers
+    return cmd("list_hanging_positions", p)
 
 
 # ═══════════════════════════════════════════════════════════════════

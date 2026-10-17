@@ -35,7 +35,7 @@ say "Vectorworks $VW_YEAR → $PLUGIN_DIR"
 
 # --- 1. Vectorworks side ----------------------------------------------------
 mkdir -p "$PLUGIN_DIR"
-for f in vwx_mcp_bridge.py commands.py vwx_pump.py vs_index.json spotlight_fields.json BridgeTCP_MenuCommand.py; do
+for f in vwx_mcp_bridge.py commands.py vwx_pump.py vs_index.json spotlight_fields.json spotlight_logic.py BridgeTCP_MenuCommand.py; do
     cp "$REPO/vwx-plugin/$f" "$PLUGIN_DIR/"
 done
 say "Bridge files copied."

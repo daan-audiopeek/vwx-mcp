@@ -1,6 +1,6 @@
 # Spotlight toolset — plan
 
-Status: **plan only, nothing built yet.** Target: Vectorworks 2026 Spotlight on
+Status: **phase 0 done (except multi-cell/accessories), phase 1 built — awaiting live test.** Target: Vectorworks 2026 Spotlight on
 macOS via the TCP bridge (see `CLAUDE.md`).
 
 Goal: let an agent read, patch, number and check a lighting plot — lighting
@@ -170,11 +170,19 @@ an accessory (in a copy); (GDTF mode question answered in run 3).
 
 | Tool | Does |
 |---|---|
-| `spotlight_info` | Spotlight present? counts of devices / positions / focus points / accessories, universes in use, field-map version |
-| `list_lighting_devices` | rows with the mapped fields; filters (`position`, `layer`, `class`, `instrument_type`, `universe`, `channel_range`, `selected`), `fields` subset, `limit` |
-| `get_lighting_device` | one device incl. all cells and accessories |
-| `list_hanging_positions` | positions with device count, trim height, layer |
-| `list_focus_points` | focus points + how many devices point at each |
+| `spotlight_info` | counts per Spotlight PIO kind; device summary: universes (devices, highest address), patched/unpatched, per position, per instrument type, footprint sources |
+| `list_lighting_devices` | typed rows; filters `position`, `layer`, `class_name`, `instrument_type`, `device_type`, `purpose`, `color`, `universe`, `patched`, `search`; `fields`, `sort` (position/address/layer/instrument_type), `limit`/`offset` |
+| `get_lighting_device` | typed row + all raw record fields + attached records + cell/accessory counts |
+| `list_hanging_positions` | positions with numbering fields, x/y/z, linked devices (count, units), device position names without an object |
+| ~~`list_focus_points`~~ | dropped for now: the test plot has no focus point objects, so the PIO name is unknown |
+
+Built (2026-10-17): verbs in `commands.py` ("Spotlight read tools"), pure
+logic in `vwx-plugin/spotlight_logic.py`, 18 tests in
+`tests/test_spotlight_logic.py` on the run-1 records, tag `spotlight`, preset
+`VWX_TOOLSET=spotlight`. Smoke-tested against a fake `vs` fed from the dump;
+**not yet run in Vectorworks.** Multi-cell devices are listed once with a
+note (per-cell fields unverified). `channel_range`/`selected` filters left
+out (channels live on the console; selection can follow in phase 2).
 
 ### 4b. Write (phase 2)
 

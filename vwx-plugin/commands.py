@@ -6982,3 +6982,190 @@ def spotlight_discover(p):
         'pio_kinds': {k: v['count'] for k, v in kinds.items()},
         'spotlight_record_formats': dump['record_formats'],
     }
+
+
+# ── Spotlight read tools (phase 1 of docs/SPOTLIGHT_PLAN.md) ─────────────────
+# vs.* side only: collect handles per design layer, read the 'Lighting Device'
+# record with GetRField, hand raw text to spotlight_logic (pure, testable).
+# Names come from spotlight_fields.json. Rules from the discovery runs
+# (AGENTS.md, "Spotlight"): read records BY NAME (the IFC record is first),
+# never pass a '__' field to LDevice_GetParam* (crashes VW), position x/y/z
+# from GetSymLoc3D (the Location text is locale-formatted).
+
+def _slx():
+    """spotlight_logic, reloaded so edits take effect like commands.py's."""
+    import importlib, sys
+    d = os.path.dirname(os.path.abspath(__file__))
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import spotlight_logic
+    return importlib.reload(spotlight_logic)
+
+
+def _sl_design_layers(p):
+    if p.get('layers'):
+        return list(p['layers'])
+    out = []
+    lh = vs.FLayer()
+    while lh:                       # layer list walk, as get_layers — not an object walk
+        if _safe(lambda: vs.GetObjectVariableInt(lh, 154), 1) != 2:
+            out.append(_safe(lambda: vs.GetLName(lh), ''))
+        lh = vs.NextLayer(lh)
+    return out
+
+
+def _sl_scan(pio, layers):
+    """[(handle, layer)] of one PIO kind, one bounded ForEachObject per layer."""
+    found = []
+    for ln in layers:
+        objs = []
+        crit = "(L='%s') & (PON='%s')" % (str(ln).replace("'", "''"), pio.replace("'", "''"))
+        _safe(lambda: vs.ForEachObject(lambda h: objs.append(h), crit))
+        found.extend((h, ln) for h in objs)
+    return found
+
+
+def _sl_raw(h, record, fields):
+    return {f: _safe(lambda f=f: vs.GetRField(h, record, f), '') for f in fields}
+
+
+def _sl_place(h, ln):
+    loc = _safe(lambda: list(vs.GetSymLoc3D(h))) or []
+    return {
+        'object_id': _oid(h),
+        'layer': ln,
+        'class': _safe(lambda: vs.GetClass(h)),
+        'x': loc[0] if len(loc) > 0 else None,
+        'y': loc[1] if len(loc) > 1 else None,
+        'z': loc[2] if len(loc) > 2 else None,
+        'rotation': _safe(lambda: vs.GetSymRot(h)),
+    }
+
+
+def _sl_devices(p, sl, fmap):
+    """Typed device rows for the scope in p. Schematic views are the same
+    device drawn twice, so they are skipped unless include_schematic."""
+    rec = fmap['records']['lighting_device']
+    fields = [s['field'] for s in fmap['lighting_device'].values()]
+    rows = []
+    for h, ln in _sl_scan(fmap['pio']['lighting_device'], _sl_design_layers(p)):
+        schem = bool(_safe(lambda: vs.IsLDSchematicViewObj(h), False))
+        if schem and not p.get('include_schematic'):
+            continue
+        extra = _sl_place(h, ln)
+        extra['schematic_view'] = schem
+        rows.append(sl.device_row(_sl_raw(h, rec, fields), fmap, extra))
+    return rows
+
+
+def _sl_multi_cell_note(rows):
+    if any((r.get('cells') or 1) > 1 for r in rows):
+        return ('multi-cell devices are listed once, with the fields of the device '
+                'record; per-cell values are not read yet (unverified, see plan phase 0)')
+    return None
+
+
+def spotlight_info(p):
+    """Spotlight overview of the drawing: object counts per Spotlight PIO kind,
+    and a device summary (universes in use, patched/unpatched, positions,
+    instrument types, footprint sources). params: layers (optional list)."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    layers = _sl_design_layers(p)
+    counts = {}
+    for kind, pio in fmap['pio'].items():
+        if kind != 'lighting_device':
+            counts[kind] = len(_sl_scan(pio, layers))
+    rows = _sl_devices(p, sl, fmap)
+    counts['lighting_device'] = len(rows)
+    out = {'status': 'ok', 'document': _safe(vs.GetFName, ''),
+           'field_map_version': fmap.get('version'), 'layers_scanned': len(layers),
+           'objects': counts, 'devices': sl.summarize(rows)}
+    note = _sl_multi_cell_note(rows)
+    if note:
+        out['note'] = note
+    return out
+
+
+def list_lighting_devices(p):
+    """Lighting devices as typed rows (canonical keys from spotlight_fields.json).
+    params: filters position, layer, class_name, instrument_type, device_type,
+    purpose, color (exact, case-insensitive), universe (int), patched (bool),
+    search (substring); fields (list of keys to return), sort
+    ('position'|'address'|'layer'|'instrument_type'), limit (default 500),
+    offset, layers, include_schematic."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    flt = {k: p.get(k) for k in ('position', 'layer', 'instrument_type', 'device_type',
+                                 'purpose', 'color', 'universe', 'patched', 'search')
+           if p.get(k) is not None}
+    if p.get('class_name') is not None:
+        flt['class'] = p.get('class_name')
+    try:
+        rows = sl.sort_rows([r for r in _sl_devices(p, sl, fmap) if sl.matches(r, flt)],
+                            p.get('sort') or 'position')
+    except ValueError as e:
+        return {'error': str(e)}
+    offset = int(p.get('offset') or 0)
+    limit = int(p.get('limit') or 500)
+    page = rows[offset:offset + limit]
+    out = {'status': 'ok', 'total': len(rows), 'offset': offset, 'count': len(page),
+           'truncated': offset + len(page) < len(rows),
+           'devices': [sl.select_fields(r, p.get('fields')) for r in page]}
+    note = _sl_multi_cell_note(rows)
+    if note:
+        out['note'] = note
+    return out
+
+
+def get_lighting_device(p):
+    """One lighting device in full: typed canonical row, every field of the
+    'Lighting Device' record as raw text, names of all attached records, cell
+    and accessory counts. params: object_id."""
+    h = _h(p.get('object_id'))
+    if h is None:
+        return {'error': 'Object not found'}
+    sl = _slx()
+    fmap = sl.load_field_map()
+    pio = fmap['pio']['lighting_device']
+    if _pio_name(h) != pio:
+        return {'error': 'not a %s (PIO is %r)' % (pio, _pio_name(h))}
+    rec = fmap['records']['lighting_device']
+    rh = _name_obj(rec)             # GetObject gives a type-0 dummy for unknown names
+    if rh is not None and _safe(lambda: vs.GetTypeN(rh), 0) != 47:
+        rh = None                   # names are global: something else may carry it
+    all_fields = [_safe(lambda i=i: vs.GetFldName(rh, i)) for i in
+                  range(1, (_safe(lambda: vs.NumFields(rh), 0) if rh else 0) + 1)]
+    raw = _sl_raw(h, rec, [f for f in all_fields if f])
+    if not raw:     # record definition not resolvable by name: fall back to the map
+        raw = _sl_raw(h, rec, [s['field'] for s in fmap['lighting_device'].values()])
+    ln = _safe(lambda: vs.GetLName(vs.GetLayer(h)), '')
+    extra = _sl_place(h, ln)
+    extra['schematic_view'] = bool(_safe(lambda: vs.IsLDSchematicViewObj(h), False))
+    row = sl.device_row(raw, fmap, extra)
+    cells = _safe(lambda: vs.LDevice_GetCellCount(h)) or 1
+    records = [_safe(lambda i=i: vs.GetName(vs.GetRecord(h, i)), '')
+               for i in range(1, _safe(lambda: vs.NumRecords(h), 0) + 1)]
+    return {'status': 'ok', 'device': row, 'record': rec, 'raw': raw,
+            'records_attached': records, 'cell_count': cells,
+            'accessories_per_cell': [_safe(lambda c=c: vs.LDevice_GetAccCount(h, c))
+                                     for c in range(max(1, cells))]}
+
+
+def list_hanging_positions(p):
+    """Hanging positions (Light Position Obj) with their record fields, layer,
+    x/y/z, and the devices linked to them by name (device_count, unit numbers).
+    Also reports device Position names that match no position object.
+    params: layers (optional list)."""
+    sl = _slx()
+    fmap = sl.load_field_map()
+    rec = fmap['records']['hanging_position']
+    fields = [s['field'] for s in fmap['hanging_position'].values()]
+    positions = [sl.position_row(_sl_raw(h, rec, fields), fmap, _sl_place(h, ln))
+                 for h, ln in _sl_scan(fmap['pio']['hanging_position'], _sl_design_layers(p))]
+    devices = _sl_devices(p, sl, fmap)
+    links = sl.link_positions(positions, devices)
+    positions.sort(key=lambda r: (str(r.get('name') or '~'), str(r.get('layer') or '')))
+    out = {'status': 'ok', 'count': len(positions), 'positions': positions}
+    out.update(links)
+    return out

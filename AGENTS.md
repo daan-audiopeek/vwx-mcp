@@ -31,7 +31,7 @@ do not use them. Tool results return `object_id` = the UUID.
 ## Toolset presets
 
 If the client is loading too many tools, set `VWX_TOOLSET` (env, in the launcher):
-`full` | `gis` | `modeling` | `baumkataster` | `minimal`. Mapping lives in
+`full` | `gis` | `modeling` | `baumkataster` | `spotlight` | `minimal`. Mapping lives in
 `mcp-server/tool_tags.py`. Filtering uses the fastmcp Visibility API
 (`mcp.enable(tags=…, only=True)`).
 
@@ -281,7 +281,7 @@ Set in `bridge/vwx-mcp.bat`.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `VWX_TOOLSET` | `full` | Toolset preset: `full`/`gis`/`modeling`/`baumkataster`/`minimal` |
+| `VWX_TOOLSET` | `full` | Toolset preset: `full`/`gis`/`modeling`/`baumkataster`/`spotlight`/`minimal` |
 | `VWX_CALL_TIMEOUT` | `60` | Per-tool timeout (s) — native `@mcp.tool(timeout=)` on every tool |
 | `VWX_TASKS` | _(off)_ | Opt long-running tools into the MCP Tasks extension. Needs `pip install 'fastmcp[tasks]'` **and** a Tasks-capable client; warns + stays off otherwise |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(off)_ | If set, exports fastmcp's spans via OTLP. Needs `opentelemetry-exporter-otlp` |
