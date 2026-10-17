@@ -375,6 +375,32 @@ class VwxMCPServer:
         command = {"type": command_type, "params": params or {}, "_cid": cid}
         payload = json.dumps(command).encode('utf-8') + b'\n'
         t0 = time.perf_counter()
+        def reconnect_and_send():
+            self.disconnect()
+            if not self.connect():
+                raise ConnectionError(
+                    f"Could not connect to Vectorworks at {self.host}:{self.port} "
+                    "and the wake-up request was not answered. Is the TCP "
+                    "dialog bridge (vwx_mcp_bridge.py) running in VW? "
+                    "Fallback: run the bridge script manually in VW.")
+            self.socket.sendall(payload)
+
+        def receive():
+            response_data = b''
+            while True:
+                chunk = self.socket.recv(65536)
+                if not chunk:
+                    break
+                response_data += chunk
+                if b'\n' in response_data:
+                    line = response_data.split(b'\n', 1)[0]
+                    return json.loads(line.decode('utf-8'))
+            # Peer closed: this socket is dead, so drop it — otherwise the
+            # next calls write into it too and come back empty as well.
+            self.disconnect()
+            return (json.loads(response_data.strip().decode('utf-8'))
+                    if response_data.strip() else {"error": "Empty response"})
+
         try:
             with self._lock:
                 # Send — a stale socket (bridge re-run in VW, idle RST) fails
@@ -387,30 +413,17 @@ class VwxMCPServer:
                 except Exception as se:
                     logger.warning(f"tool={command_type} cid={cid} stale socket "
                                    f"({se}) — reconnecting")
-                    self.disconnect()
-                    if not self.connect():
-                        raise ConnectionError(
-                            f"Could not connect to Vectorworks at {self.host}:{self.port} "
-                            "and the wake-up request was not answered. Is the TCP "
-                            "dialog bridge (vwx_mcp_bridge.py) running in VW? "
-                            "Fallback: run the bridge script manually in VW.")
-                    self.socket.sendall(payload)
+                    reconnect_and_send()
                 # Receive — NO retry here: the command may already be executing
                 # in VW; resending would double-execute mutating commands.
-                response_data = b''
-                result = None
-                while True:
-                    chunk = self.socket.recv(65536)
-                    if not chunk:
-                        break
-                    response_data += chunk
-                    if b'\n' in response_data:
-                        line = response_data.split(b'\n', 1)[0]
-                        result = json.loads(line.decode('utf-8'))
-                        break
-                if result is None:
-                    result = (json.loads(response_data.strip().decode('utf-8'))
-                              if response_data.strip() else {"error": "Empty response"})
+                # Exception: stale_conn — a handler of a previous bridge
+                # generation refused the command without queueing it.
+                result = receive()
+                if isinstance(result, dict) and result.get("stale_conn"):
+                    logger.warning(f"tool={command_type} cid={cid} stale bridge "
+                                   "connection — reconnecting and resending")
+                    reconnect_and_send()
+                    result = receive()
             ms = (time.perf_counter() - t0) * 1000
             status = "err" if isinstance(result, dict) and result.get("error") else "ok"
             logger.info(f"tool={command_type} cid={cid} ms={ms:.0f} status={status}")

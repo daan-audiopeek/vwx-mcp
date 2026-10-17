@@ -182,6 +182,14 @@ def _handle(conn):
             except Exception as e:
                 conn.sendall(json.dumps({'error': f'bad JSON: {e}'}).encode() + b'\n')
                 continue
+            # The bridge may have been re-run while this handler sat in recv():
+            # its queue has no pump any more. Refuse WITHOUT queueing, so the
+            # client knows the command never ran and can resend on a new conn.
+            if _read_gen() != _MY_GEN:
+                _log("Handler: newer bridge generation detected — refusing cmd (stale conn)")
+                conn.sendall(json.dumps({'error': 'stale bridge connection (bridge was re-run)',
+                                         'stale_conn': True}).encode() + b'\n')
+                return
             cmd  = msg.get('type', '')
             prms = msg.get('params', {})
             # 'poll' is answered in this I/O thread — works even while the VW
