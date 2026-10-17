@@ -6854,6 +6854,11 @@ def spotlight_discover(p):
         return {'error': "probe must be 'none', 'one' or 'all'"}
     anon = bool(p.get('anonymize'))
     samples = int(p.get('samples', 5))
+    # Check the target before scanning, so a bad path does not cost a full probe run.
+    out = os.path.expanduser(p.get('out_path') or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'spotlight_discovery.json'))
+    if not os.path.isdir(os.path.dirname(out) or '.'):
+        return {'error': 'folder does not exist: %s' % os.path.dirname(out)}
     t0 = time.time()
 
     # Layers: list walk is fine (FLayer/NextLayer, as get_layers); objects are not walked.
@@ -6945,8 +6950,6 @@ def spotlight_discover(p):
         'devices': devices,
         'other_spotlight_objects': {k: v['items'] for k, v in kinds.items() if v['items']},
     }
-    out = p.get('out_path') or os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), 'spotlight_discovery.json')
     try:
         with open(out, 'w', encoding='utf-8') as f:
             json.dump(dump, f, ensure_ascii=False, indent=1, default=str)
