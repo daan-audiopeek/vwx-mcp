@@ -36,6 +36,10 @@ Full context map, crash-test history and lifecycle:
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. The classic TCP dialog
 bridge remains for macOS/remote (`VWX_TRANSPORT=tcp`, [legacy/](legacy/README.md)).
 
+## Install (macOS)
+
+See **[docs/MACOS.md](docs/MACOS.md)**: `./bridge/install-macos.sh`, then one menu command in Vectorworks. macOS uses the TCP dialog bridge (all tools, but the VW UI is locked while the bridge dialog is open).
+
 ## Install (Windows)
 
 1. Copy `vwx-plugin/` contents to `%APPDATA%\Nemetschek\Vectorworks\2026\Plug-ins\VWX-MCP\`

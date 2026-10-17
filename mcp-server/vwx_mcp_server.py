@@ -96,6 +96,24 @@ VWX_WAKE_TIMEOUT = float(os.environ.get('VWX_WAKE_TIMEOUT', '25'))
 VWX_TRANSPORT = os.environ.get(
     'VWX_TRANSPORT', 'file' if sys.platform == 'win32' else 'tcp').lower()
 
+def _vw_user_roots():
+    """Vectorworks user-data roots for this platform (macOS + Windows).
+
+    macOS: ~/Library/Application Support/Vectorworks/<year>/Plug-ins
+    Windows: %APPDATA%\\Nemetschek\\Vectorworks\\<year>\\Plug-ins
+    VWX_USER_ROOT overrides both (point it at the folder holding <year>/).
+    """
+    forced_root = os.environ.get('VWX_USER_ROOT')
+    if forced_root:
+        return [forced_root]
+    roots = []
+    if sys.platform == 'darwin':
+        roots.append(os.path.expanduser('~/Library/Application Support/Vectorworks'))
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        roots.append(os.path.join(appdata, 'Nemetschek', 'Vectorworks'))
+    return roots
+
 def vw_versions():
     """Vectorworks major versions installed for this user, newest first.
 
@@ -107,14 +125,14 @@ def vw_versions():
     forced = os.environ.get('VWX_VW_VERSION')
     if forced:
         return [forced]
-    root = os.path.join(os.environ.get('APPDATA', ''), 'Nemetschek',
-                        'Vectorworks')
-    try:
-        found = [d for d in os.listdir(root)
-                 if len(d) == 4 and d.isdigit()
-                 and os.path.isdir(os.path.join(root, d))]
-    except Exception:
-        return []
+    found = set()
+    for root in _vw_user_roots():
+        try:
+            found.update(d for d in os.listdir(root)
+                         if len(d) == 4 and d.isdigit()
+                         and os.path.isdir(os.path.join(root, d)))
+        except Exception:
+            pass
     return sorted(found, reverse=True)
 
 
@@ -122,13 +140,12 @@ def _plugin_dir():
     base = os.environ.get('VWX_PLUGIN_DIR')
     if base and os.path.isdir(base):
         return base
-    appdata = os.environ.get('APPDATA', '')
-    for version in vw_versions():
-        for name in ('VW-MCP', 'VWX-MCP'):
-            cand = os.path.join(appdata, 'Nemetschek', 'Vectorworks', version,
-                                'Plug-ins', name)
-            if os.path.isdir(cand):
-                return cand
+    for root in _vw_user_roots():
+        for version in vw_versions():
+            for name in ('VW-MCP', 'VWX-MCP'):
+                cand = os.path.join(root, version, 'Plug-ins', name)
+                if os.path.isdir(cand):
+                    return cand
     return None
 
 def _wake_file_path():
@@ -3039,7 +3056,7 @@ def main():
     if transport in ("http", "streamable-http", "sse"):
         mcp.run(
             transport=transport,
-            host=os.environ.get("FASTMCP_HOST", "0.0.0.0"),
+            host=os.environ.get("FASTMCP_HOST", "127.0.0.1"),
             port=int(os.environ.get("FASTMCP_PORT", "8082")),
             # uvicorn's default timeout_keep_alive is 5s: any two tool calls
             # spaced further apart raced the server's FIN on the idle keep-alive
@@ -3051,8 +3068,6 @@ def main():
     else:
         mcp.run(transport=transport)
 
-if __name__ == "__main__":
-    main()
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -3318,3 +3333,9 @@ def confirm_active_document(ctx: Context, expected: str) -> str:
     cannot rule out the wrong folder, so it is not allowed to override it).
     """
     return cmd("confirm_active_document", {"expected": expected})
+
+
+# Must stay LAST: tools defined below this guard would never register
+# when the server is started as a script (mcp.run() blocks).
+if __name__ == "__main__":
+    main()

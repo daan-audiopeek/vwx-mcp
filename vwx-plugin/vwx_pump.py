@@ -31,6 +31,24 @@ IPC layout (plugin dir):
 """
 import os, sys, json, time, traceback
 
+def _vw_user_roots():
+    """Vectorworks user-data roots for this platform (macOS + Windows).
+
+    macOS: ~/Library/Application Support/Vectorworks/<year>/Plug-ins
+    Windows: %APPDATA%\\Nemetschek\\Vectorworks\\<year>\\Plug-ins
+    VWX_USER_ROOT overrides both (point it at the folder holding <year>/).
+    """
+    forced_root = os.environ.get('VWX_USER_ROOT')
+    if forced_root:
+        return [forced_root]
+    roots = []
+    if sys.platform == 'darwin':
+        roots.append(os.path.expanduser('~/Library/Application Support/Vectorworks'))
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        roots.append(os.path.join(appdata, 'Nemetschek', 'Vectorworks'))
+    return roots
+
 def _vw_roots():
     """Vectorworks plug-in roots for every installed major version, newest first.
 
@@ -38,17 +56,18 @@ def _vw_roots():
     version-specific, and the failure mode on a new Vectorworks was silent —
     the path simply did not exist and every job timed out with no explanation.
     """
-    root = os.path.join(os.environ.get('APPDATA', ''), 'Nemetschek',
-                        'Vectorworks')
     forced = os.environ.get('VWX_VW_VERSION')
-    versions = [forced] if forced else []
-    if not versions:
-        try:
-            versions = sorted((d for d in os.listdir(root)
-                               if len(d) == 4 and d.isdigit()), reverse=True)
-        except Exception:
-            versions = []
-    return [os.path.join(root, v, 'Plug-ins') for v in versions]
+    out = []
+    for root in _vw_user_roots():
+        versions = [forced] if forced else []
+        if not versions:
+            try:
+                versions = sorted((d for d in os.listdir(root)
+                                   if len(d) == 4 and d.isdigit()), reverse=True)
+            except Exception:
+                versions = []
+        out += [os.path.join(root, v, 'Plug-ins') for v in versions]
+    return out
 
 
 try:

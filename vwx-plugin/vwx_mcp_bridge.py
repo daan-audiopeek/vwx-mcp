@@ -21,6 +21,25 @@ API notes (from vs.py stub, 3071 functions):
 """
 import os, sys, socket, threading, queue, json, traceback, time, uuid
 
+def _vw_user_roots():
+    """Vectorworks user-data roots for this platform (macOS + Windows).
+
+    macOS: ~/Library/Application Support/Vectorworks/<year>/Plug-ins
+    Windows: %APPDATA%\\Nemetschek\\Vectorworks\\<year>\\Plug-ins
+    VWX_USER_ROOT overrides both (point it at the folder holding <year>/).
+    """
+    forced_root = os.environ.get('VWX_USER_ROOT')
+    if forced_root:
+        return [forced_root]
+    roots = []
+    if sys.platform == 'darwin':
+        roots.append(os.path.expanduser('~/Library/Application Support/Vectorworks'))
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        roots.append(os.path.join(appdata, 'Nemetschek', 'Vectorworks'))
+    return roots
+
+
 BRIDGE_VERSION = '3.0'
 
 # VW Run Script executes as <string> — no __file__. Fallback to plugin dir.
@@ -30,29 +49,33 @@ except NameError:
     # Newest installed Vectorworks that actually has the plug-in, not a
     # hardcoded year. VWX_VW_VERSION forces one, matching every other
     # component.
-    _root = os.path.join(os.environ.get('APPDATA', ''), 'Nemetschek',
-                         'Vectorworks')
+    # VWX_PLUGIN_DIR wins; the macOS loader menu command sets it.
+    _DIR = os.environ.get('VWX_PLUGIN_DIR') or None
     _forced = os.environ.get('VWX_VW_VERSION')
-    if _forced:
-        _versions = [_forced]
-    else:
-        try:
-            _versions = sorted((d for d in os.listdir(_root)
-                                if len(d) == 4 and d.isdigit()), reverse=True)
-        except Exception:
-            _versions = []
-    _DIR = None
-    for _version in _versions:
-        for _name in ('VWX-MCP', 'VW-MCP'):
-            _cand = os.path.join(_root, _version, 'Plug-ins', _name)
-            if os.path.isdir(_cand):
-                _DIR = _cand
+    _fallback = None
+    for _root in ([] if _DIR else _vw_user_roots()):
+        if _forced:
+            _versions = [_forced]
+        else:
+            try:
+                _versions = sorted((d for d in os.listdir(_root)
+                                    if len(d) == 4 and d.isdigit()), reverse=True)
+            except Exception:
+                _versions = []
+        for _version in _versions:
+            if _fallback is None:
+                _fallback = os.path.join(_root, _version, 'Plug-ins', 'VWX-MCP')
+            for _name in ('VWX-MCP', 'VW-MCP'):
+                _cand = os.path.join(_root, _version, 'Plug-ins', _name)
+                if os.path.isdir(_cand):
+                    _DIR = _cand
+                    break
+            if _DIR:
                 break
         if _DIR:
             break
     if _DIR is None:
-        _newest = _versions[0] if _versions else ''
-        _DIR = os.path.join(_root, _newest, 'Plug-ins', 'VWX-MCP')
+        _DIR = _fallback or os.path.join(os.path.expanduser('~'), 'VWX-MCP')
 if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
