@@ -6755,3 +6755,209 @@ def datatag_refresh_all(p):
     """Re-render every Data Tag in the document (needed after editing a Data Tag style)."""
     vs.DT_ResetAllDataTags()
     return {'status': 'ok'}
+
+
+# ── Spotlight discovery (phase 0 of docs/SPOTLIGHT_PLAN.md) ──────────────────
+# Read-only. Measures what VW2026 Spotlight really stores — PIO names, record
+# fields, LDevice_GetParam* universal names, cells, accessories, nesting — so
+# the Spotlight verbs can be built on a verified field map instead of guesses.
+# The full dump goes to a JSON file next to this module (Application Support:
+# no macOS privacy prompt, unlike ~/Desktop); only a summary goes over the bridge.
+#
+# Scans one design layer at a time (no unscoped document-wide ForEachObject,
+# see resource_delete). LDevice_GetParam* with an unknown universal name may
+# raise VW's engine-error dialog, and on macOS nothing auto-dismisses it — so
+# probing is opt-in: probe='one' (first device) before probe='all'.
+
+_SL_KIND = re.compile(r'light|position|focus|truss|legend|hoist|accessor|screen|'
+                      r'cable|distribut|dmx|instrument|lamp|fixture|pipe|boom', re.I)
+
+# Likely universal (worksheet) names; the device's own record field names are
+# probed as well. Wrong guesses are expected — that's what the probe measures.
+_SL_CANDIDATES = [
+    'Unit Number', 'Channel', 'Universe', 'Address', 'Absolute Address',
+    'DMX Address', 'DMX Footprint', 'Num Channels', 'Footprint', 'Mode',
+    'Fixture Mode', 'Fixture ID', 'Position', 'Purpose', 'Instrument Type',
+    'Inst Type', 'Device Type', 'Wattage', 'Color', 'Gobo 1', 'Gobo 2',
+    'Circuit Number', 'Circuit Name', 'Dimmer', 'Focus', 'Symbol Name',
+    'Weight', 'Frame Size', 'Field Angle', 'Beam Angle', 'Lamp', 'UID',
+    'GDTF Fixture', 'GDTF Mode', 'Inventory Type', 'User Field 1',
+]
+_SL_NUMERIC = re.compile(r'unit|channel|universe|address|footprint|num |'
+                         r'wattage|weight|angle|id$', re.I)
+
+
+def _sl_anon(v):
+    """Hash text with letters; keep numbers, booleans and empties readable."""
+    import hashlib
+    s = '' if v is None else str(v)
+    if not re.search(r'[A-Za-zÀ-ÿ]', s) or s in ('True', 'False', 'Wahr', 'Falsch'):
+        return s
+    return 'txt:%d:%s' % (len(s), hashlib.sha1(s.encode('utf-8')).hexdigest()[:6])
+
+
+def _sl_records(h, anon):
+    """All records on h: {record: {field: value}} plus {record: {field: type}}."""
+    vals, types = {}, {}
+    for i in range(1, _safe(lambda: vs.NumRecords(h), 0) + 1):
+        rh = _safe(lambda i=i: vs.GetRecord(h, i))
+        if not rh:
+            continue
+        rn = _safe(lambda: vs.GetName(rh), '') or 'record_%d' % i
+        fv, ft = {}, {}
+        for j in range(1, _safe(lambda: vs.NumFields(rh), 0) + 1):
+            fn = _safe(lambda j=j: vs.GetFldName(rh, j)) or 'f%d' % j
+            v = _safe(lambda fn=fn: vs.GetRField(h, rn, fn), '')
+            fv[fn] = _sl_anon(v) if anon else v
+            ft[fn] = _safe(lambda j=j: vs.GetFldType(rh, j))
+        vals[rn], types[rn] = fv, ft
+    return vals, types
+
+
+def _sl_probe(h, names, cell=0, acc=-1, anon=False):
+    """LDevice_GetParam* per universal name: {name: {str, long?, real?}}."""
+    out = {}
+    for n in names:
+        sv = _safe(lambda n=n: vs.LDevice_GetParamStr(h, cell, acc, n), '<err>')
+        r = {'str': _sl_anon(sv) if anon and sv != '<err>' else sv}
+        if _SL_NUMERIC.search(n):
+            r['long'] = _safe(lambda n=n: vs.LDevice_GetParamLong(h, cell, acc, n), '<err>')
+            r['real'] = _safe(lambda n=n: vs.LDevice_GetParamReal(h, cell, acc, n), '<err>')
+        out[n] = r
+    return out
+
+
+def _sl_field_stats(rows, rec):
+    """Per field of record rec over all rows: filled count, distinct count, samples."""
+    stats = {}
+    for r in rows:
+        for fn, v in (r['records'].get(rec) or {}).items():
+            s = stats.setdefault(fn, {'filled': 0, 'values': set()})
+            if v not in ('', None):
+                s['filled'] += 1
+                s['values'].add(str(v))
+    return {fn: {'filled': s['filled'], 'distinct': len(s['values']),
+                 'samples': sorted(s['values'])[:5]} for fn, s in stats.items()}
+
+
+def spotlight_discover(p):
+    """Read-only Spotlight discovery dump (phase 0 of docs/SPOTLIGHT_PLAN.md).
+    Writes the full dump to a JSON file next to commands.py, returns a summary.
+    params: layers (list, default all design layers), probe ('none'|'one'|'all',
+    default 'none' — 'one' first: unknown names may pop a VW error dialog),
+    candidates (extra universal names to probe), samples (full records kept per
+    non-device PIO kind, default 5), anonymize (bool, hash text values),
+    out_path (optional)."""
+    import time
+    probe = p.get('probe', 'none')
+    if probe not in ('none', 'one', 'all'):
+        return {'error': "probe must be 'none', 'one' or 'all'"}
+    anon = bool(p.get('anonymize'))
+    samples = int(p.get('samples', 5))
+    t0 = time.time()
+
+    # Layers: list walk is fine (FLayer/NextLayer, as get_layers); objects are not walked.
+    all_layers = []
+    lh = vs.FLayer()
+    while lh:
+        if _safe(lambda: vs.GetObjectVariableInt(lh, 154), 1) != 2:
+            all_layers.append(_safe(lambda: vs.GetLName(lh), ''))
+        lh = vs.NextLayer(lh)
+    layers = p.get('layers') or all_layers
+
+    kinds, devices, layer_ms = {}, [], {}
+    for ln in layers:
+        lt = time.time()
+        objs = []
+        crit = "(L='%s') & (T=PLUGINOBJECT)" % str(ln).replace("'", "''")
+        _safe(lambda: vs.ForEachObject(lambda h: objs.append(h), crit))
+        for h in objs:
+            pn = _pio_name(h) or '?'
+            k = kinds.setdefault(pn, {'count': 0, 'layers': {}, 'spotlight_like':
+                                      bool(_SL_KIND.search(pn)), 'items': []})
+            k['count'] += 1
+            k['layers'][ln] = k['layers'].get(ln, 0) + 1
+            if not k['spotlight_like']:
+                continue
+            is_dev = 'lighting device' in pn.lower()
+            if not is_dev and len(k['items']) >= samples:
+                continue
+            par = _safe(lambda: vs.GetParent(h))
+            row = {
+                'object_id': _oid(h),
+                'pio': pn,
+                'layer': ln,
+                'class': _safe(lambda: vs.GetClass(h)),
+                'style': _safe(lambda: vs.GetPluginStyle(h)),
+                'parent_type': _safe(lambda: vs.GetTypeN(par)) if par else None,
+                'parent_pio': _pio_name(par) if par else None,
+                'loc2d': _safe(lambda: list(vs.GetSymLoc(h))),
+                'loc3d': _safe(lambda: list(vs.GetSymLoc3D(h))),
+                'rotation': _safe(lambda: vs.GetSymRot(h)),
+                'nested_objects': _safe(lambda: _deep_count(h, cap=200)),
+            }
+            row['records'], row['field_types'] = _sl_records(h, anon)
+            if is_dev:
+                row['schematic_view'] = _safe(lambda: vs.IsLDSchematicViewObj(h))
+                cells = _safe(lambda: vs.LDevice_GetCellCount(h))
+                row['cell_count'] = cells
+                row['acc_count_per_cell'] = [
+                    _safe(lambda c=c: vs.LDevice_GetAccCount(h, c))
+                    for c in range(max(1, cells or 1))]
+                devices.append(row)
+            else:
+                k['items'].append(row)
+        layer_ms[ln] = int((time.time() - lt) * 1000)
+
+    # Probe universal names on device rows (opt-in, see header).
+    probed = 0
+    if probe != 'none' and devices:
+        dev_rec = next(iter(devices[0]['records']), None)
+        names = list(dict.fromkeys(
+            list((devices[0]['records'].get(dev_rec) or {}).keys())
+            + _SL_CANDIDATES + list(p.get('candidates') or [])))
+        for row in (devices[:1] if probe == 'one' else devices):
+            h = _h(row['object_id'])
+            if h is None:
+                continue
+            row['probe'] = {'device': _sl_probe(h, names, anon=anon)}
+            for c in range(1, row.get('cell_count') or 1):
+                row['probe']['cell_%d' % c] = _sl_probe(h, names, cell=c, anon=anon)
+            for c, n_acc in enumerate(row['acc_count_per_cell']):
+                for a in range(n_acc or 0):
+                    row['probe']['cell_%d_acc_%d' % (c, a)] = _sl_probe(h, names, c, a, anon)
+            probed += 1
+
+    dev_kinds = sorted({d['pio'] for d in devices})
+    dev_rec = next(iter(devices[0]['records']), None) if devices else None
+    dump = {
+        'tool': 'spotlight_discover', 'version': 1,
+        'vw_version': _safe(lambda: list(vs.GetVersion())),
+        'document': _sl_anon(_safe(vs.GetFName, '')) if anon else _safe(vs.GetFName, ''),
+        'params': {k: v for k, v in p.items() if k != 'out_path'},
+        'layers_scanned': layer_ms,
+        'record_formats': [n for n in _resource_names(47) if _SL_KIND.search(n)],
+        'vision_mapping': _safe(lambda: vs.GetVisionMapping()) if probe != 'none' else None,
+        'pio_kinds': {k: {kk: vv for kk, vv in v.items() if kk != 'items'}
+                      for k, v in kinds.items()},
+        'device_record': dev_rec,
+        'device_field_stats': _sl_field_stats(devices, dev_rec) if dev_rec else {},
+        'devices': devices,
+        'other_spotlight_objects': {k: v['items'] for k, v in kinds.items() if v['items']},
+    }
+    out = p.get('out_path') or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'spotlight_discovery.json')
+    try:
+        with open(out, 'w', encoding='utf-8') as f:
+            json.dump(dump, f, ensure_ascii=False, indent=1, default=str)
+    except Exception as e:
+        return {'error': 'could not write %s: %s' % (out, e)}
+    return {
+        'status': 'ok', 'out_path': out, 'ms': int((time.time() - t0) * 1000),
+        'layers_scanned': len(layer_ms), 'devices': len(devices),
+        'device_kinds': dev_kinds, 'probed_devices': probed,
+        'multi_cell_devices': sum(1 for d in devices if (d.get('cell_count') or 1) > 1),
+        'devices_with_accessories': sum(1 for d in devices if any(d['acc_count_per_cell'])),
+        'pio_kinds': {k: v['count'] for k, v in kinds.items()},
+        'spotlight_record_formats': dump['record_formats'],
+    }

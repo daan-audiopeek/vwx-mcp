@@ -55,6 +55,28 @@ Spotlight drawing (ideally a VW sample plot plus one of our own) to record:
    equivalent, and which one keeps Spotlight's internal state consistent.
 6. Which of `LightingInv*/Univ*/SL_Export` open a modal dialog.
 
+### Running the discovery
+
+The verb `spotlight_discover` (in `commands.py`, reachable via the `vwx`
+dispatcher; deliberately no `@vtool` — it is a one-off tool) does all of the
+above **read-only**. On the Mac:
+
+1. `git pull && ./bridge/install-macos.sh` (deploys the new `commands.py`).
+2. Open a **copy** of the drawing in VW2026, run **VWX Bridge**, `ping`.
+3. `vwx("spotlight_discover", {})` — records, PIO kinds, cells, accessories,
+   nesting. No `LDevice_*` probing, so no risk of error dialogs.
+4. `vwx("spotlight_discover", {"probe": "one"})` — probes ~36 candidate
+   universal names plus the device's own field names on the **first** device.
+   An unknown name may raise VW's error dialog (nothing auto-dismisses it on
+   macOS): click OK and note it. If it stays quiet, `{"probe": "all"}`.
+5. The dump lands in
+   `~/Library/Application Support/Vectorworks/2026/Plug-ins/VWX-MCP/spotlight_discovery.json`
+   (each run overwrites it; pass `out_path` to keep several). Large plots:
+   limit with `{"layers": ["…"]}`; every layer's scan time is in the dump.
+6. `{"anonymize": true}` hashes all text values (document name, positions,
+   purposes, notes) and keeps numbers readable — use this if the dump goes
+   into the repo.
+
 Output: a field map committed as `vwx-plugin/spotlight_fields.json`
 (our canonical key → VW universal name → type), and a new "Spotlight" section
 in AGENTS.md's gotcha table. Everything after this phase reads names from that
