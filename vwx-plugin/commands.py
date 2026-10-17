@@ -7165,7 +7165,7 @@ def list_hanging_positions(p):
                  for h, ln in _sl_scan(fmap['pio']['hanging_position'], _sl_design_layers(p))]
     devices = _sl_devices(p, sl, fmap)
     links = sl.link_positions(positions, devices)
-    positions.sort(key=lambda r: (str(r.get('name') or '~'), str(r.get('layer') or '')))
+    positions = sl.sort_positions(positions)
     out = {'status': 'ok', 'count': len(positions), 'positions': positions}
     out.update(links)
     return out

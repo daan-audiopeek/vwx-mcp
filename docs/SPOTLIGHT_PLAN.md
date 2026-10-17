@@ -1,6 +1,6 @@
 # Spotlight toolset — plan
 
-Status: **phase 0 done (except multi-cell/accessories), phase 1 built — awaiting live test.** Target: Vectorworks 2026 Spotlight on
+Status: **phase 0 done (except multi-cell/accessories), phase 1 done and live-tested.** Target: Vectorworks 2026 Spotlight on
 macOS via the TCP bridge (see `CLAUDE.md`).
 
 Goal: let an agent read, patch, number and check a lighting plot — lighting
@@ -179,8 +179,10 @@ an accessory (in a copy); (GDTF mode question answered in run 3).
 Built (2026-10-17): verbs in `commands.py` ("Spotlight read tools"), pure
 logic in `vwx-plugin/spotlight_logic.py`, 18 tests in
 `tests/test_spotlight_logic.py` on the run-1 records, tag `spotlight`, preset
-`VWX_TOOLSET=spotlight`. Smoke-tested against a fake `vs` fed from the dump;
-**not yet run in Vectorworks.** Multi-cell devices are listed once with a
+`VWX_TOOLSET=spotlight`. Smoke-tested against a fake `vs` fed from the dump, then **live-tested on
+the Franciscus copy (2026-10-17)**: every expected number matched; 5–26 ms
+inside VW per call, ~0.6 s round trip via the bridge. Only tool fix: natural
+sort (Trek6 before Trek10) for positions and device sorts. Multi-cell devices are listed once with a
 note (per-cell fields unverified). `channel_range`/`selected` filters left
 out (channels live on the console; selection can follow in phase 2).
 
@@ -232,6 +234,22 @@ plus a summary; `rules=[…]` and `severity` filter. First rules:
 | device on a layer/class outside the drawing's conventions (configurable lists) | warning |
 | Z / trim height 0 for a device on a flown position | warning |
 | schematic view without its source device | warning |
+
+Real cases from the live test (Franciscus), to become test fixtures:
+
+- 6 devices (301–306) on position "Trek1", no `Light Position Obj` of that
+  name (positions run Trek6–Trek51) → *position name without object*.
+- universe 1: 501–508 (footprint 18, every 10) and 301–306 (13, every 5)
+  overlap — all `record_unverified`, the real patch is correct → must come out
+  as *footprint unverified* warnings, **not** patch errors (false positives
+  otherwise).
+- `TotalHungWeight` 170 kg on Trek40/Trek9 with 0 devices, empty pipes
+  32.5–45.5 kg → candidate rule *hung weight without devices* (info: something
+  else hangs there, or the weight is stale).
+- one position at z=5000 while the rest share another trim → candidate rule
+  *trim outlier* (info).
+- class/legend name not matching the instrument type (MH X25 vs MH 360) →
+  candidate rule *class vs instrument type* (info, opt-in).
 
 Rules are data (`spotlight_logic.RULES`), so a project-specific profile
 (`qc_profile` dict) can switch rules off or change severities.

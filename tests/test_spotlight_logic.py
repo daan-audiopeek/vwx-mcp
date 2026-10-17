@@ -145,6 +145,20 @@ class FilterSortTest(unittest.TestCase):
         self.assertEqual(set(r), {'unit', 'object_id'})
 
 
+class NaturalSortTest(unittest.TestCase):
+    def test_trek_order(self):
+        # live test 2026-10-17: alphabetic order put Trek10..Trek51 before Trek6
+        names = ['Trek10', 'Trek6', 'Trek51', 'Trek9', '', 'Trek40', 'FOH 1']
+        got = [p['name'] for p in sl.sort_positions([{'name': n} for n in names])]
+        self.assertEqual(got, ['FOH 1', 'Trek6', 'Trek9', 'Trek10', 'Trek40', 'Trek51', ''])
+
+    def test_device_sort_by_natural_position(self):
+        rows = [{'position': 'Trek10', 'unit_number': 1}, {'position': 'Trek6', 'unit_number': 2},
+                {'position': 'Trek6', 'unit_number': 1}, {'position': None, 'unit_number': 1}]
+        got = [(r['position'], r['unit_number']) for r in sl.sort_rows(rows, 'position')]
+        self.assertEqual(got, [('Trek6', 1), ('Trek6', 2), ('Trek10', 1), (None, 1)])
+
+
 class PositionLinkTest(unittest.TestCase):
     def test_link_by_name(self):
         _, _, rows = _rows()

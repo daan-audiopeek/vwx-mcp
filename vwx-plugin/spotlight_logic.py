@@ -165,18 +165,31 @@ def matches(row, flt):
     return True
 
 
+_DIGITS = re.compile(r'(\d+)')
+
+
+def natural_key(text):
+    """'Trek6' < 'Trek10' < 'Trek51': digit runs compare as numbers. Empty
+    sorts last ('~' would not: it is just another character here)."""
+    s = str(text or '').strip()
+    if not s:
+        return (1, ())
+    return (0, tuple((0, int(t), '') if t.isdigit() else (1, 0, t.lower())
+                     for t in _DIGITS.split(s) if t))
+
+
 def _num_or_big(v):
     return v if isinstance(v, (int, float)) else float('inf')
 
 
 SORTS = {
-    'position': lambda r: (str(r.get('position') or '~'), _num_or_big(r.get('unit_number')),
-                           str(r.get('unit') or '')),
+    'position': lambda r: (natural_key(r.get('position')), _num_or_big(r.get('unit_number')),
+                           natural_key(r.get('unit'))),
     'address': lambda r: (_num_or_big(r.get('universe_number')), _num_or_big(r.get('address'))),
-    'layer': lambda r: (str(r.get('layer') or ''), str(r.get('position') or ''),
+    'layer': lambda r: (natural_key(r.get('layer')), natural_key(r.get('position')),
                         _num_or_big(r.get('unit_number'))),
-    'instrument_type': lambda r: (str(r.get('instrument_type') or '~'),
-                                  str(r.get('position') or '')),
+    'instrument_type': lambda r: (natural_key(r.get('instrument_type')),
+                                  natural_key(r.get('position'))),
 }
 
 
@@ -222,6 +235,10 @@ def summarize(rows):
         'instrument_types': dict(sorted(types.items())),
         'footprint_sources': sources,
     }
+
+
+def sort_positions(positions):
+    return sorted(positions, key=lambda r: (natural_key(r.get('name')), natural_key(r.get('layer'))))
 
 
 def link_positions(positions, devices):
